@@ -25,6 +25,9 @@ import org.apache.uima.resource.ResourceInitializationException;
 import org.apache.uima.util.CasPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.apache.commons.io.IOUtils;
+import java.io.InputStream;
+import java.io.IOException;
 
 /**
  * Resource holder for uima
@@ -89,9 +92,35 @@ public class UimaResource {
 		}
 		
 		return cas;
-		
-		
 	}
+	
+	/**
+	 * Use the given analysis engine and process the given text
+	 * You must release the return cas yourself
+	 * @param text the text to process
+	 * @return the processed cas
+	 */
+	public  CAS process(InputStream textstream) {
+		CAS cas = retrieve();
+		if(cas == null) return null;
+                String text = null;
+		try {
+                        text = IOUtils.toString(textstream,"UTF-8");
+		        cas.setDocumentText(text);
+			analysisEngine.process(cas);
+		} catch (AnalysisEngineProcessException e) {
+			log.warn("Unable to process text " + text,e);
+		} catch (IOException io) {
+			log.warn("Unable to process input stream with UTF-8 ",io);
+		} catch (NullPointerException npe) {
+			log.warn("Null textstream given as input",npe);
+		}
+		
+		return cas;
+	}
+
+
+
 	
 	
 	public  CAS retrieve() {

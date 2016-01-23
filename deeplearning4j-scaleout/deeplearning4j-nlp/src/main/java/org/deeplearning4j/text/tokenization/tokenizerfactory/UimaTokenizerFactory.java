@@ -44,6 +44,8 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 	private UimaResource uimaResource;
 	private boolean checkForLabel;
 	private static AnalysisEngine defaultAnalysisEngine;
+        private String token_name;
+
 	private TokenPreProcess preProcess;
 
 	public UimaTokenizerFactory() throws ResourceInitializationException {
@@ -52,6 +54,12 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 
 	public UimaTokenizerFactory(UimaResource resource) {
 		this(resource,true);
+	}
+
+	public UimaTokenizerFactory(UimaResource resource, String token_class) {
+		this.uimaResource = resource;
+		this.checkForLabel = true;
+                this.token_name = token_class;
 	}
 
 	public UimaTokenizerFactory(AnalysisEngine tokenizer) {
@@ -82,8 +90,8 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 		if(toTokenize == null)
 			throw new IllegalArgumentException("Unable to proceed; on sentence to tokenize");
 		Tokenizer ret = new UimaTokenizer(toTokenize,uimaResource,checkForLabel);
-		ret.setTokenPreProcessor(preProcess);
-		return ret;
+                ret.setTokenPreProcessor(preProcess);
+                return ret;
 	}
 
 	public UimaResource getUimaResource() {
@@ -110,9 +118,21 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 	}
 
 
+        /** Assumes InputStream is UTF-8
+        */
 	@Override
 	public Tokenizer create(InputStream toTokenize) {
-		throw new UnsupportedOperationException();
+		if(toTokenize == null)
+			throw new IllegalArgumentException("Unable to proceed; null InputStream");
+		Tokenizer ret = null;
+                if(token_name==null) {
+		    //ret = new UimaTokenizer(toTokenize,uimaResource,checkForLabel);
+		    throw new UnsupportedOperationException();
+                } else {
+		    ret = new UimaTokenizer(toTokenize,uimaResource,token_name);
+                }
+                ret.setTokenPreProcessor(preProcess);
+                return ret;
 	}
 
 	@Override
