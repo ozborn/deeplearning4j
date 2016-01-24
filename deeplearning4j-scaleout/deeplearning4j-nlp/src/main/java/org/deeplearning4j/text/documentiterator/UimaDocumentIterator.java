@@ -50,6 +50,7 @@ public class UimaDocumentIterator implements DocumentIterator {
 
         try {
             sentenceClass = Class.forName(sentence_classname);
+	    log.info("Creating sentence class!");
             this.reader = CollectionReaderFactory.createReader(crd, params);
         } catch (ClassNotFoundException cnfe) {
             throw new RuntimeException(cnfe);
@@ -70,10 +71,11 @@ public class UimaDocumentIterator implements DocumentIterator {
                     log.warn("Done iterating returning an empty string");
                     return new BufferedInputStream(IOUtils.toInputStream(""));
                 }
-                resource.getAnalysisEngine().process(cas);
+                resource.getAnalysisEngine().process(cas.getJCas());
                 List<String> list = new ArrayList<>();
                 for(Object some_sentence : JCasUtil.select(cas.getJCas(), sentenceClass)) {
                     Annotation sentence = (Annotation) some_sentence;
+                    log.info("Found annotation:"+sentence);
                     list.add(sentence.getCoveredText());
                 }
 		if(list.size()==0) log.warn("Did not find any sentences annotated");

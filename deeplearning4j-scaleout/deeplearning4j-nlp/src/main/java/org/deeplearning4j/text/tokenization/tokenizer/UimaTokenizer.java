@@ -77,6 +77,27 @@ public class UimaTokenizer implements Tokenizer {
     }
 
 
+    /** Tokenizes on the basis of UIMA annotations tokens
+    */
+    public UimaTokenizer(String tokentext,UimaResource resource,String token_classname) {
+    
+        this.tokens = new ArrayList<>();
+	log.info("Called UIMA String Tokenzier constructor to get tokens of type "+token_classname);
+        try {
+            tokenClass = Class.forName(token_classname);
+            CAS cas = resource.process(tokentext);
+            for(Object some_token : JCasUtil.select(cas.getJCas(), tokenClass)) {
+                    Annotation atoken = (Annotation) some_token;
+                    this.tokens.add(atoken.getCoveredText());
+            }
+            if(this.tokens.size()==0) log.warn("Failed to get any "+token_classname+" tokens.");
+           resource.release(cas);
+        } catch (Exception e) {
+        	e.printStackTrace();
+            throw new RuntimeException(e);
+        }
+    }
+
 
     /** Tokenizes on the basis of text covered by org.apache.uima.jcas.tcas.Annotation
     * Should handle org.apache.ctakes.typesystem.type.syntax.BaseToken
@@ -85,6 +106,7 @@ public class UimaTokenizer implements Tokenizer {
     
         this.checkForLabel = checkForLabel;
         this.tokens = new ArrayList<>();
+	log.info("Called correct uimatokenizer constructor to get "+token_classname);
         try {
             tokenClass = Class.forName(token_classname);
             CAS cas = resource.process(tokenstream);
@@ -99,6 +121,7 @@ public class UimaTokenizer implements Tokenizer {
             throw new RuntimeException(e);
         }
     }
+
 
     private boolean valid(String check) {
         return !(check.matches("<[A-Z]+>") || check.matches("</[A-Z]+>"));

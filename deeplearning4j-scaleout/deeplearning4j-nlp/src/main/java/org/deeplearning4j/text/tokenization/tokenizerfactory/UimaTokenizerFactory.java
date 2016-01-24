@@ -30,6 +30,9 @@ import org.deeplearning4j.text.tokenization.tokenizer.Tokenizer;
 import org.deeplearning4j.text.tokenization.tokenizer.UimaTokenizer;
 import org.deeplearning4j.text.uima.UimaResource;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 
 /**
  * Uses a uima {@link AnalysisEngine} to 
@@ -47,6 +50,7 @@ public class UimaTokenizerFactory implements TokenizerFactory {
         private String token_name;
 
 	private TokenPreProcess preProcess;
+ 	private static final Logger log = LoggerFactory.getLogger(UimaTokenizerFactory.class);
 
 	public UimaTokenizerFactory() throws ResourceInitializationException {
 		this(defaultAnalysisEngine(),true);
@@ -87,9 +91,12 @@ public class UimaTokenizerFactory implements TokenizerFactory {
 
 	@Override
 	public  Tokenizer create(String toTokenize) {
+		log.info("Tokenizing string");
 		if(toTokenize == null)
 			throw new IllegalArgumentException("Unable to proceed; on sentence to tokenize");
-		Tokenizer ret = new UimaTokenizer(toTokenize,uimaResource,checkForLabel);
+		Tokenizer ret = null;
+		if(token_name!=null) ret = new UimaTokenizer(toTokenize,uimaResource,token_name);
+		else { ret = new UimaTokenizer(toTokenize,uimaResource,checkForLabel); }
                 ret.setTokenPreProcessor(preProcess);
                 return ret;
 	}
@@ -122,6 +129,7 @@ public class UimaTokenizerFactory implements TokenizerFactory {
         */
 	@Override
 	public Tokenizer create(InputStream toTokenize) {
+		log.info("Tokenizing InputStream");
 		if(toTokenize == null)
 			throw new IllegalArgumentException("Unable to proceed; null InputStream");
 		Tokenizer ret = null;
