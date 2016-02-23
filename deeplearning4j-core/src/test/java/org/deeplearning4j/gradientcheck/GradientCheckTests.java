@@ -11,8 +11,6 @@ import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.conf.Updater;
 import org.deeplearning4j.nn.conf.distribution.NormalDistribution;
 import org.deeplearning4j.nn.conf.layers.*;
-import org.deeplearning4j.nn.conf.preprocessor.CnnToFeedForwardPreProcessor;
-import org.deeplearning4j.nn.conf.preprocessor.FeedForwardToRnnPreProcessor;
 import org.deeplearning4j.nn.conf.preprocessor.RnnToCnnPreProcessor;
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 import org.deeplearning4j.nn.weights.WeightInit;
@@ -68,7 +66,7 @@ public class GradientCheckTests {
 			                .optimizationAlgo(OptimizationAlgorithm.CONJUGATE_GRADIENT)
 			                .learningRate(1.0)
 			                .seed(12345L)
-			                .list(2)
+			                .list()
 			                .layer(0, new DenseLayer.Builder()
 									.nIn(4).nOut(3)
 									.weightInit(WeightInit.DISTRIBUTION).dist(new NormalDistribution(0, 1))
@@ -153,7 +151,7 @@ public class GradientCheckTests {
 				                .l2(l2).l1(l1)
 				                .optimizationAlgo(OptimizationAlgorithm.CONJUGATE_GRADIENT)
 				                .seed(12345L)
-				                .list(2)
+				                .list()
 				                .layer(0, new DenseLayer.Builder()
 										.nIn(4).nOut(3)
 										.weightInit(WeightInit.XAVIER).dist(new NormalDistribution(0, 1))
@@ -205,6 +203,53 @@ public class GradientCheckTests {
     		}
     	}
     }
+
+	@Test
+	public void testEmbeddingLayerSimple(){
+		Random r = new Random(12345);
+		int nExamples = 5;
+		INDArray input = Nd4j.zeros(nExamples,1);
+		INDArray labels = Nd4j.zeros(nExamples,3);
+		for( int i=0; i<nExamples; i++ ){
+			input.putScalar(i,r.nextInt(4));
+			labels.putScalar(new int[]{i,r.nextInt(3)},1.0);
+		}
+
+		MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
+				.regularization(true)
+				.l2(0.2).l1(0.1)
+				.optimizationAlgo(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT)
+				.seed(12345L)
+				.list()
+				.layer(0, new EmbeddingLayer.Builder()
+						.nIn(4).nOut(3)
+						.weightInit(WeightInit.XAVIER).dist(new NormalDistribution(0, 1))
+						.updater(Updater.NONE)
+						.activation("tanh")
+						.build())
+				.layer(1, new OutputLayer.Builder(LossFunction.MCXENT)
+						.nIn(3).nOut(3)
+						.weightInit(WeightInit.XAVIER).dist(new NormalDistribution(0, 1))
+						.updater(Updater.NONE)
+						.activation("softmax")
+						.build())
+				.pretrain(false).backprop(true)
+				.build();
+
+		MultiLayerNetwork mln = new MultiLayerNetwork(conf);
+		mln.init();
+
+		if(PRINT_RESULTS) {
+			System.out.println("testEmbeddingLayerSimple");
+			for( int j=0; j<mln.getnLayers(); j++ ) System.out.println("Layer " + j + " # params: " + mln.getLayer(j).numParams());
+		}
+
+		boolean gradOK = GradientCheckUtil.checkGradients(mln, DEFAULT_EPS, DEFAULT_MAX_REL_ERROR,
+				PRINT_RESULTS, RETURN_ON_FIRST_FAILURE, input, labels, true);
+
+		String msg = "testEmbeddingLayerSimple";
+		assertTrue(msg,gradOK);
+	}
     
     
     @Test
@@ -221,7 +266,7 @@ public class GradientCheckTests {
     	MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
 	        .regularization(false)
 	        .seed(12345L)
-	        .list(3)
+	        .list()
 	        .layer(0, new GRU.Builder().nIn(nIn).nOut(gruLayerSize).activation("tanh")
 	        		.weightInit(WeightInit.DISTRIBUTION).dist(new NormalDistribution(0,1.0))
 	        		.updater(Updater.NONE).build())
@@ -309,10 +354,10 @@ public class GradientCheckTests {
     				double l1 = l1vals[k];
     				
 			        MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
-			                .regularization(l1>0.0 && l2>0.0)
+			                .regularization(l1>0.0 || l2>0.0)
 			                .l2(l2).l1(l1)
 			                .seed(12345L)
-			                .list(2)
+			                .list()
 			                .layer(0, new GRU.Builder().nIn(nIn).nOut(layerSize).activation(afn)
 			                		.weightInit(WeightInit.DISTRIBUTION).dist(new NormalDistribution(0,1))
 			                		.updater(Updater.NONE).build())
@@ -375,7 +420,7 @@ public class GradientCheckTests {
     		MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
 	            .regularization(false)
 	            .seed(12345L)
-	            .list(2)
+	            .list()
 	            .layer(0, new GRU.Builder().nIn(nIn).nOut(layerSize)
 	            		.weightInit(WeightInit.DISTRIBUTION).dist(new NormalDistribution(0,1)).updater(Updater.NONE).build())
 	            .layer(1, new RnnOutputLayer.Builder(LossFunction.MCXENT).activation("softmax").nIn(layerSize).nOut(nOut)
@@ -407,7 +452,7 @@ public class GradientCheckTests {
     	MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
 	        .regularization(false)
 	        .seed(12345L)
-	        .list(3)
+	        .list()
 	        .layer(0, new GravesLSTM.Builder().nIn(nIn).nOut(layerSize).activation("sigmoid")
                 .weightInit(WeightInit.XAVIER).dist(new NormalDistribution(0,1.0)).updater(Updater.NONE).build())
 	        .layer(1, new GravesLSTM.Builder().nIn(layerSize).nOut(layerSize).activation("sigmoid")
@@ -494,10 +539,10 @@ public class GradientCheckTests {
     				double l1 = l1vals[k];
     				
 			        MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
-			                .regularization(l1>0.0 && l2>0.0)
+			                .regularization(l1>0.0 || l2>0.0)
 			                .l2(l2).l1(l1)
 			                .seed(12345L)
-			                .list(2)
+			                .list()
 			                .layer(0, new GravesLSTM.Builder().nIn(nIn).nOut(layerSize)
 			                		.weightInit(WeightInit.DISTRIBUTION).dist(new NormalDistribution(0,1))
 			                		.activation(afn).updater(Updater.NONE).build())
@@ -563,7 +608,7 @@ public class GradientCheckTests {
     		MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
 	            .regularization(false)
 	            .seed(12345L)
-	            .list(2)
+	            .list()
 	            .layer(0, new GravesLSTM.Builder().nIn(nIn).nOut(layerSize).weightInit(WeightInit.DISTRIBUTION)
 	            		.dist(new NormalDistribution(0,1)).updater(Updater.NONE).build())
 	            .layer(1, new RnnOutputLayer.Builder(LossFunction.MCXENT).activation("softmax").nIn(layerSize).nOut(nOut)
@@ -589,8 +634,8 @@ public class GradientCheckTests {
 		String[] outputActivations = {"softmax","tanh"};	//i.e., lossFunctions[i] used with outputActivations[i] here
 
 		int timeSeriesLength = 4;
-		int nIn = 1;
-		int layerSize = 1;
+		int nIn = 2;
+		int layerSize = 2;
 		int nOut = 2;
 		int miniBatchSize = 3;
 
@@ -625,10 +670,10 @@ public class GradientCheckTests {
 					double l1 = l1vals[k];
 
 					MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
-							.regularization(l1>0.0 && l2>0.0)
+							.regularization(l1>0.0 || l2>0.0)
 							.l2(l2).l1(l1)
 							.seed(12345L)
-							.list(2)
+							.list()
 							.layer(0, new GravesBidirectionalLSTM.Builder().nIn(nIn).nOut(layerSize)
 									.weightInit(WeightInit.DISTRIBUTION).dist(new NormalDistribution(0,1))
 									.activation(afn).updater(Updater.NONE).build())
@@ -695,7 +740,7 @@ public class GradientCheckTests {
 			MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
 					.regularization(false)
 					.seed(12345L)
-					.list(2)
+					.list()
 					.layer(0, new GravesBidirectionalLSTM.Builder().nIn(nIn).nOut(layerSize).weightInit(WeightInit.DISTRIBUTION)
 							.dist(new NormalDistribution(0,1)).updater(Updater.NONE).build())
 					.layer(1, new RnnOutputLayer.Builder(LossFunction.MCXENT).activation("softmax").nIn(layerSize).nOut(nOut)
@@ -739,7 +784,7 @@ public class GradientCheckTests {
 
 		MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
 				.seed(12345)
-				.list(5)
+				.list()
 				.layer(0, new ConvolutionLayer.Builder(5, 5)
 						.nIn(3)
 						.nOut(5)
@@ -828,7 +873,7 @@ public class GradientCheckTests {
                                 .l2(l2).l1(l1)
                                 .optimizationAlgo(OptimizationAlgorithm.CONJUGATE_GRADIENT)
                                 .seed(12345L)
-                                .list(2)
+                                .list()
                                 .layer(0, new RBM.Builder(RBM.HiddenUnit.BINARY, RBM.VisibleUnit.BINARY)
                                         .nIn(4).nOut(3)
                                         .weightInit(WeightInit.XAVIER)
@@ -916,7 +961,7 @@ public class GradientCheckTests {
                                 .l2(l2).l1(l1)
                                 .optimizationAlgo(OptimizationAlgorithm.CONJUGATE_GRADIENT)
                                 .seed(12345L)
-                                .list(2)
+                                .list()
                                 .layer(0, new AutoEncoder.Builder()
                                         .nIn(4).nOut(3)
                                         .weightInit(WeightInit.XAVIER).dist(new NormalDistribution(0, 1))

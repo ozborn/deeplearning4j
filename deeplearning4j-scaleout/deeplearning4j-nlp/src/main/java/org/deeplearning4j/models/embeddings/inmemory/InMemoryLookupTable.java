@@ -28,7 +28,7 @@ import org.deeplearning4j.models.embeddings.WeightLookupTable;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
 import org.deeplearning4j.plot.Tsne;
-import org.deeplearning4j.plot.dropwizard.RenderApplication;
+//import org.deeplearning4j.ui.UiServer;
 import org.nd4j.linalg.api.buffer.DataBuffer;
 import org.nd4j.linalg.api.buffer.FloatBuffer;
 import org.nd4j.linalg.api.ndarray.INDArray;
@@ -122,6 +122,7 @@ public class InMemoryLookupTable<T extends SequenceElement> implements WeightLoo
 
     @Override
     public void plotVocab(Tsne tsne) {
+
         try {
             List<String> plot = new ArrayList<>();
             for(String s : vocab.words()) {
@@ -133,7 +134,17 @@ public class InMemoryLookupTable<T extends SequenceElement> implements WeightLoo
         }
 
         try {
-            RenderApplication.main(null);
+/*            UiServer server = UiServer.getInstance();
+
+            System.out.println("Please open your browser and navigate to: http://localhost:" + server.getPort() + "/");
+*/
+            /*
+                TODO: push 2D coordinates to the UIServer here, since we don't want to tie TSNE to IterationListener mechanics: it will be too much data updated
+             */
+
+
+            // we don't need older render engine anymore
+            // RenderApplication.main(null);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -147,15 +158,8 @@ public class InMemoryLookupTable<T extends SequenceElement> implements WeightLoo
         Tsne tsne = new Tsne.Builder()
                 .normalize(false).setFinalMomentum(0.8f)
                 .setMaxIter(1000).build();
-        try {
-            List<String> plot = new ArrayList<>();
-            for(String s : vocab.words()) {
-                plot.add(s);
-            }
-            tsne.plot(syn0, 2, plot);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+
+        plotVocab(tsne);
     }
 
 
@@ -210,7 +214,7 @@ public class InMemoryLookupTable<T extends SequenceElement> implements WeightLoo
     @Override
     @Deprecated
     public  void iterateSample(T w1, T w2,AtomicLong nextRandom,double alpha) {
-        /*if(w2 == null || w2.getIndex() < 0 || w1.getIndex() == w2.getIndex() || w1.getLabel().equals("STOP") || w2.getLabel().equals("STOP") || w1.getLabel().equals("UNK") || w2.getLabel().equals("UNK"))
+        if(w2 == null || w2.getIndex() < 0 || w1.getIndex() == w2.getIndex() || w1.getLabel().equals("STOP") || w2.getLabel().equals("STOP") || w1.getLabel().equals("UNK") || w2.getLabel().equals("UNK"))
            return;
             //current word vector
         INDArray l1 = this.syn0.slice(w2.getIndex());
@@ -290,11 +294,11 @@ public class InMemoryLookupTable<T extends SequenceElement> implements WeightLoo
                 double f = Nd4j.getBlasWrapper().dot(l1,syn1Neg.slice(target));
                 double g;
                 if (f > MAX_EXP)
-                    g = useAdaGrad ? w1.getGradient(target, (label - 1)) : (label - 1) *  alpha;
+                    g = useAdaGrad ? w1.getGradient(target, (label - 1), alpha) : (label - 1) *  alpha;
                 else if (f < -MAX_EXP)
-                    g = label * (useAdaGrad ?  w1.getGradient(target, alpha) : alpha);
+                    g = label * (useAdaGrad ?  w1.getGradient(target, alpha, alpha) : alpha);
                 else
-                    g = useAdaGrad ? w1.getGradient(target, label - expTable[(int)((f + MAX_EXP) * (expTable.length / MAX_EXP / 2))]) : (label - expTable[(int)((f + MAX_EXP) * (expTable.length / MAX_EXP / 2))]) *   alpha;
+                    g = useAdaGrad ? w1.getGradient(target, label - expTable[(int)((f + MAX_EXP) * (expTable.length / MAX_EXP / 2))], alpha) : (label - expTable[(int)((f + MAX_EXP) * (expTable.length / MAX_EXP / 2))]) *   alpha;
                 if(syn0.data().dataType() == DataBuffer.Type.DOUBLE)
                     Nd4j.getBlasWrapper().axpy(g,syn1Neg.slice(target),neu1e);
                 else
@@ -312,7 +316,7 @@ public class InMemoryLookupTable<T extends SequenceElement> implements WeightLoo
         else
             Nd4j.getBlasWrapper().axpy(1.0f,neu1e,l1);
 
-        */
+
     }
 
     public boolean isUseAdaGrad() {
@@ -666,5 +670,29 @@ public class InMemoryLookupTable<T extends SequenceElement> implements WeightLoo
                 ", vocab=" + vocab +
                 ", codes=" + codes +
                 '}';
+    }
+
+    /**
+     * This method consumes weights of a given InMemoryLookupTable
+     *
+     * PLEASE NOTE: this method explicitly resets current weights
+     *
+     * @param srcTable
+     */
+    public void consume(InMemoryLookupTable<T> srcTable) {
+        if (srcTable.vectorLength != this.vectorLength)
+            throw new IllegalStateException("You can't consume lookupTable with different vector lengths");
+
+        if (srcTable.syn0 == null)
+            throw new IllegalStateException("Source lookupTable Syn0 is NULL");
+
+        this.resetWeights(true);
+
+        if (srcTable.syn0.rows() > this.syn0.rows())
+            throw new IllegalStateException("You can't consume lookupTable with built for larger vocabulary without updating your vocabulary first");
+
+        for (int x = 0; x < srcTable.syn0.rows(); x++) {
+            this.syn0.putRow(x, srcTable.syn0.getRow(x).dup());
+        }
     }
 }

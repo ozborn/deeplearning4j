@@ -23,6 +23,7 @@ import org.deeplearning4j.nn.api.LayerFactory;
 import org.deeplearning4j.nn.api.ParamInitializer;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.conf.layers.DenseLayer;
+import org.deeplearning4j.nn.layers.feedforward.embedding.EmbeddingLayer;
 import org.deeplearning4j.nn.params.DefaultParamInitializer;
 import org.deeplearning4j.optimize.api.IterationListener;
 import org.nd4j.linalg.api.ndarray.INDArray;
@@ -87,13 +88,17 @@ public class DefaultLayerFactory implements LayerFactory {
         if(layerConfig instanceof org.deeplearning4j.nn.conf.layers.RecursiveAutoEncoder)
             return new org.deeplearning4j.nn.layers.feedforward.autoencoder.recursive.RecursiveAutoEncoder(conf);   
         if(layerConfig instanceof org.deeplearning4j.nn.conf.layers.ConvolutionLayer)
-            return new org.deeplearning4j.nn.layers.convolution.ConvolutionLayer(conf);   
+            return new org.deeplearning4j.nn.layers.convolution.ConvolutionLayer(conf);
         if(layerConfig instanceof org.deeplearning4j.nn.conf.layers.SubsamplingLayer)
             return new org.deeplearning4j.nn.layers.convolution.subsampling.SubsamplingLayer(conf);
          if(layerConfig instanceof org.deeplearning4j.nn.conf.layers.BatchNormalization)
              return new org.deeplearning4j.nn.layers.normalization.BatchNormalization(conf);
         if(layerConfig instanceof org.deeplearning4j.nn.conf.layers.LocalResponseNormalization)
             return new org.deeplearning4j.nn.layers.normalization.LocalResponseNormalization(conf);
+        if(layerConfig instanceof org.deeplearning4j.nn.conf.layers.EmbeddingLayer)
+            return new EmbeddingLayer(conf);
+        if(layerConfig instanceof  org.deeplearning4j.nn.conf.layers.ActivationLayer)
+            return new org.deeplearning4j.nn.layers.ActivationLayer(conf);
         throw new RuntimeException("unknown layer type: " + layerConfig);
     }
 

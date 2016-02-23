@@ -20,10 +20,12 @@ package org.deeplearning4j.models.embeddings.wordvectors;
 
 import com.google.common.util.concurrent.AtomicDouble;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.Setter;
 import org.deeplearning4j.clustering.vptree.VPTree;
 import org.deeplearning4j.models.embeddings.reader.ModelUtils;
 import org.deeplearning4j.models.embeddings.reader.impl.BasicModelUtils;
+import org.deeplearning4j.models.embeddings.reader.impl.FlatModelUtils;
 import org.deeplearning4j.models.sequencevectors.sequence.SequenceElement;
 import org.deeplearning4j.models.embeddings.WeightLookupTable;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
@@ -43,7 +45,7 @@ public class WordVectorsImpl<T extends SequenceElement> implements WordVectors {
     @Getter protected WeightLookupTable<T> lookupTable;
     @Getter protected VocabCache<T> vocab;
     @Getter protected int layerSize = 100;
-    @Getter @Setter protected transient ModelUtils<T> modelUtils;
+    @Getter protected transient ModelUtils<T> modelUtils = new BasicModelUtils<>();
 
     protected int numIterations = 1;
     protected int numEpochs = 1;
@@ -59,8 +61,8 @@ public class WordVectorsImpl<T extends SequenceElement> implements WordVectors {
     protected int workers = Runtime.getRuntime().availableProcessors();
     protected boolean trainSequenceVectors = false;
     protected boolean trainElementsVectors = true;
+    protected long seed;
 
-    protected transient VPTree vpTree;
 
     public final static String UNK = "UNK";
     @Getter protected List<String> stopWords = new ArrayList<>(); //StopWords.getStopWords();
@@ -219,7 +221,16 @@ public class WordVectorsImpl<T extends SequenceElement> implements WordVectors {
         return lookupTable;
     }
 
-    public void setLookupTable(WeightLookupTable lookupTable) {
+    @Override
+    @SuppressWarnings("unchecked")
+    public void setModelUtils(@NonNull ModelUtils modelUtils) {
+        if (lookupTable != null) {
+            modelUtils.init(lookupTable);
+            this.modelUtils = modelUtils;
+        }
+    }
+
+    public void setLookupTable(@NonNull WeightLookupTable lookupTable) {
         this.lookupTable = lookupTable;
         if (modelUtils == null) this.modelUtils = new BasicModelUtils<T>();
 

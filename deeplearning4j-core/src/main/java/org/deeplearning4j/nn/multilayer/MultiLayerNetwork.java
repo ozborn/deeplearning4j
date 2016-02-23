@@ -19,7 +19,6 @@
 package org.deeplearning4j.nn.multilayer;
 
 
-import org.apache.commons.lang3.ArrayUtils;
 import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.eval.Evaluation;
 import org.deeplearning4j.nn.api.*;
@@ -180,8 +179,7 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
                         layerInput = activationFromPrevLayer(j - 1, layerInput,true);
 
                     log.info("Training on layer " + (i + 1) + " with " + layerInput.slices() + " examples");
-                    getLayers()[i].fit(layerInput);
-
+                    getLayer(i).fit(layerInput);
                 }
             }
             iter.reset();
@@ -963,17 +961,16 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
      */
     @Override
     public int numParams() {
-        int length = 0;
-        for (int i = 0; i < layers.length; i++)
-            length += layers[i].numParams();
-
-        return length;
-
+        return numParams(false);
     }
 
     @Override
     public int numParams(boolean backwards) {
-        return numParams();
+        int length = 0;
+        for (int i = 0; i < layers.length; i++)
+            length += layers[i].numParams(backwards);
+
+        return length;
     }
 
     /**
@@ -1145,18 +1142,20 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
 
         }
         if (layerWiseConfigurations.isBackprop()) {
+            if(layerWiseConfigurations.isPretrain())
+                iter.reset();
             while (iter.hasNext()) {
                 DataSet next = iter.next();
                 if (next.getFeatureMatrix() == null || next.getLabels() == null)
                     break;
 
                 boolean hasMaskArrays = next.hasMaskArrays();
-                if(hasMaskArrays) setLayerMaskArrays(next.getFeaturesMaskArray(), next.getLabelsMaskArray());
 
                 if(layerWiseConfigurations.getBackpropType() == BackpropType.TruncatedBPTT) {
-                    doTruncatedBPTT(next.getFeatureMatrix(),next.getLabels());
+                    doTruncatedBPTT(next.getFeatureMatrix(),next.getLabels(),next.getFeaturesMaskArray(),next.getLabelsMaskArray());
                 }
                 else {
+                    if(hasMaskArrays) setLayerMaskArrays(next.getFeaturesMaskArray(), next.getLabelsMaskArray());
                     setInput(next.getFeatureMatrix());
                     setLabels(next.getLabels());
                     if( solver == null ){
@@ -1260,9 +1259,10 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
         return new Pair<>(gradient,currPair.getSecond());
     }
 
-    protected void doTruncatedBPTT(INDArray input, INDArray labels) {
+    protected void doTruncatedBPTT(INDArray input, INDArray labels, INDArray featuresMaskArray, INDArray labelsMaskArray) {
         if( input.rank() != 3 || labels.rank() != 3 ){
-            log.warn("Cannot do truncated BPTT with non-3d inputs or labels. Expect input with shape [miniBatchSize,nIn,timeSeriesLength]");
+            log.warn("Cannot do truncated BPTT with non-3d inputs or labels. Expect input with shape [miniBatchSize,nIn,timeSeriesLength], got "
+                    + Arrays.toString(input.shape()) + "\t" + Arrays.toString(labels.shape()));
             return;
         }
         if( input.size(2) != labels.size(2) ){
@@ -1274,7 +1274,7 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
         int timeSeriesLength = input.size(2);
         int nSubsets = timeSeriesLength / fwdLen;
         if(fwdLen > timeSeriesLength) {
-            log.warn("Cannot do TBPTT: Truncated BPTT forward length > input time series length.");
+            log.warn("Cannot do TBPTT: Truncated BPTT forward length (" + fwdLen + ") > input time series length (" + timeSeriesLength + ")");
             return;
         }
 
@@ -1290,6 +1290,16 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
             setInput(inputSubset);
             setLabels(labelSubset);
 
+            INDArray featuresMaskSubset = null;
+            INDArray labelsMaskSubset = null;
+            if(featuresMaskArray != null){
+                 featuresMaskSubset = featuresMaskArray.get(NDArrayIndex.all(), NDArrayIndex.interval(startTimeIdx,endTimeIdx));
+            }
+            if(labelsMaskArray != null){
+                labelsMaskSubset = labelsMaskArray.get(NDArrayIndex.all(), NDArrayIndex.interval(startTimeIdx,endTimeIdx));
+            }
+            if(featuresMaskSubset != null || labelsMaskSubset != null) setLayerMaskArrays(featuresMaskSubset,labelsMaskSubset);
+
             if(solver == null) {
                 solver = new Solver.Builder()
                         .configure(conf())
@@ -1303,9 +1313,10 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
         }
 
         rnnClearPreviousState();
+        if(featuresMaskArray != null || labelsMaskArray != null) clearLayerMaskArrays();
     }
 
-    protected void updateRnnStateWithTBPTTState() {
+    public void updateRnnStateWithTBPTTState() {
         for(int i=0; i<layers.length; i++){
             if(layers[i] instanceof BaseRecurrentLayer) {
                 BaseRecurrentLayer<?> l = ((BaseRecurrentLayer<?>)layers[i]);
@@ -1484,7 +1495,7 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
 
         if(layerWiseConfigurations.isBackprop()) {
             if(layerWiseConfigurations.getBackpropType() == BackpropType.TruncatedBPTT) {
-                doTruncatedBPTT(data,labels);
+                doTruncatedBPTT(data,labels,null,null);
             }
             else {
                 if( solver == null) {
@@ -1524,10 +1535,15 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
      */
     @Override
     public void fit(org.nd4j.linalg.dataset.api.DataSet data) {
-        boolean hasMaskArrays = data.hasMaskArrays();
-        if(hasMaskArrays) setLayerMaskArrays(data.getFeaturesMaskArray(), data.getLabelsMaskArray());
-        fit(data.getFeatureMatrix(), data.getLabels());
-        if(hasMaskArrays) clearLayerMaskArrays();
+        if(layerWiseConfigurations.getBackpropType() == BackpropType.TruncatedBPTT) {
+            doTruncatedBPTT(data.getFeatureMatrix(),data.getLabels(),data.getFeaturesMaskArray(),data.getLabelsMaskArray());
+        } else {
+            //Standard training
+            boolean hasMaskArrays = data.hasMaskArrays();
+            if(hasMaskArrays) setLayerMaskArrays(data.getFeaturesMaskArray(), data.getLabelsMaskArray());
+            fit(data.getFeatureMatrix(), data.getLabels());
+            if(hasMaskArrays) clearLayerMaskArrays();
+        }
     }
 
     /**
@@ -1718,7 +1734,8 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
     public double score(DataSet data, boolean training){
         boolean hasMaskArray = data.hasMaskArrays();
         if(hasMaskArray) setLayerMaskArrays(data.getFeaturesMaskArray(),data.getLabelsMaskArray());
-        feedForward(data.getFeatureMatrix());
+        // activation for output layer is calculated in computeScore
+        feedForwardToLayer(layers.length - 2, data.getFeatureMatrix(),training);
         setLabels(data.getLabels());
         if( getOutputLayer() instanceof BaseOutputLayer ){
             BaseOutputLayer<?> ol = (BaseOutputLayer<?>)getOutputLayer();
@@ -1731,6 +1748,34 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
         }
         if(hasMaskArray) clearLayerMaskArrays();
         return score();
+    }
+
+    /**Calculate the score for each example in a DataSet individually. Unlike {@link #score(DataSet)} and {@link #score(DataSet, boolean)}
+     * this method does not average/sum over examples. This method allows for examples to be scored individually (at test time only), which
+     * may be useful for example for autoencoder architectures and the like.<br>
+     * Each row of the output (assuming addRegularizationTerms == true) is equivalent to calling score(DataSet) with a single example.
+     * @param data The data to score
+     * @param addRegularizationTerms If true: add l1/l2 regularization terms (if any) to the score. If false: don't add regularization terms
+     * @return An INDArray (column vector) of size input.numRows(); the ith entry is the score (loss value) of the ith example
+     */
+    public INDArray scoreExamples(DataSet data, boolean addRegularizationTerms){
+        boolean hasMaskArray = data.hasMaskArrays();
+        if(hasMaskArray) setLayerMaskArrays(data.getFeaturesMaskArray(),data.getLabelsMaskArray());
+        feedForward(data.getFeatureMatrix(),false);
+        setLabels(data.getLabels());
+
+        INDArray out;
+        if( getOutputLayer() instanceof BaseOutputLayer ){
+            BaseOutputLayer<?> ol = (BaseOutputLayer<?>)getOutputLayer();
+            ol.setLabels(data.getLabels());
+            double l1 = (addRegularizationTerms ? calcL1() : 0.0);
+            double l2 = (addRegularizationTerms ? calcL2() : 0.0);
+            out = ol.computeScoreForExamples(l1,l2);
+        } else {
+            throw new UnsupportedOperationException("Cannot calculate score wrt labels without an OutputLayer");
+        }
+        if(hasMaskArray) clearLayerMaskArrays();
+        return out;
     }
 
 
@@ -1752,6 +1797,11 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
     @Override
     public double score() {
         return score;
+    }
+
+
+    public void setScore(double score) {
+        this.score = score;
     }
 
     @Override
@@ -2305,6 +2355,10 @@ public class MultiLayerNetwork implements Serializable, Classifier, Layer {
     public void setLayerMaskArrays(INDArray featuresMaskArray, INDArray labelsMaskArray){
         if(featuresMaskArray != null){
             //feedforward layers below a RNN layer: need the input (features) mask array
+            //Reason: even if the time series input is zero padded, the output from the dense layers are
+            // non-zero (i.e., activationFunction(0*weights + bias) != 0 in general)
+            //This assumes that the time series input is masked - i.e., values are 0 at the padded time steps,
+            // so we don't need to do anything for the recurrent layer
 
             //Now, if mask array is 2d -> need to reshape to 1d (column vector) in the exact same order
             // as is done for 3d -> 2d time series reshaping

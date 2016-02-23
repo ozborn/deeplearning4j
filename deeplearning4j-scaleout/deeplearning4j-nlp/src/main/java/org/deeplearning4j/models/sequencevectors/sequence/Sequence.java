@@ -14,9 +14,16 @@ import java.util.*;
  */
 public class Sequence<T extends SequenceElement> implements Serializable {
 
-    private static final long serialVersionUID = 2223750736522624731L;
+    private static final long serialVersionUID = 2223750736522624732L;
 
     protected List<T> elements = new ArrayList<>();
+
+    // elements map needed to speedup searches againt elements in sequence
+    protected Map<String, T> elementsMap = new LinkedHashMap<>();
+
+    // each document can have multiple labels
+    protected List<T> labels = new ArrayList<>();
+
     protected T label;
 
     @Getter @Setter protected int sequenceId;
@@ -44,8 +51,9 @@ public class Sequence<T extends SequenceElement> implements Serializable {
      *
      * @param element
      */
-    public void addElement(@NonNull T element) {
-        this.elements.add( element);
+    public synchronized void addElement(@NonNull T element) {
+        this.elementsMap.put(element.getLabel(), element);
+        this.elements.add(element);
     }
 
     /**
@@ -78,10 +86,7 @@ public class Sequence<T extends SequenceElement> implements Serializable {
      * @return
      */
     public T getElementByLabel(@NonNull String label) {
-        for (T element: elements) {
-            if (element.getLabel().equals(label)) return element;
-        }
-        return null;
+        return elementsMap.get(label);
     }
 
     /**
@@ -103,18 +108,46 @@ public class Sequence<T extends SequenceElement> implements Serializable {
     }
 
     /**
+     * Returns all labels for this sequence
+     *
+     * @return
+     */
+    public List<T> getSequenceLabels() {
+        return labels;
+    }
+
+    /**
+     * Sets sequence labels
+     * @param labels
+     */
+    public void setSequenceLabels(List<T> labels) {
+        this.labels = labels;
+    }
+
+    /**
      * Set sequence label
      *
      * @param label
      */
     public void setSequenceLabel(@NonNull T label) {
-       this.label = label;
+        this.label = label;
+        if (!labels.contains(label)) labels.add(label);
+    }
+
+    /**
+     *  Adds sequence label. In this case sequence will have multiple labels
+     *
+     * @param label
+     */
+    public void addSequenceLabel(@NonNull T label) {
+        this.labels.add(label);
+        if (this.label == null) this.label = label;
     }
 
     @Override
     public String toString() {
         return "Sequence{" +
-                " label=" + label +
+                " labels=" + labels +
                 ", elements=" + elements +
                 '}';
     }

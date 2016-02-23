@@ -2,6 +2,8 @@ package org.deeplearning4j.models.word2vec.wordstore;
 
 import lombok.Data;
 import lombok.NonNull;
+import org.deeplearning4j.models.embeddings.inmemory.InMemoryLookupTable;
+import org.deeplearning4j.models.embeddings.wordvectors.WordVectors;
 import org.deeplearning4j.models.sequencevectors.interfaces.SequenceIterator;
 import org.deeplearning4j.models.sequencevectors.sequence.Sequence;
 import org.deeplearning4j.models.sequencevectors.sequence.SequenceElement;
@@ -32,6 +34,8 @@ public class VocabConstructor<T extends SequenceElement> {
     private List<String> stopWords;
     private boolean useAdaGrad = false;
     private boolean fetchLabels = false;
+    private int limit;
+    private AtomicLong seqCount = new AtomicLong(0);
 
     protected static final Logger log = LoggerFactory.getLogger(VocabConstructor.class);
 
@@ -56,6 +60,83 @@ public class VocabConstructor<T extends SequenceElement> {
     }
 
     /**
+     * This method transfers existing WordVectors model into current one
+     *
+     * @param wordVectors
+     * @return
+     */
+    @SuppressWarnings("unchecked") // method is safe, since all calls inside are using generic SequenceElement methods
+    public VocabCache<T> buildMergedVocabulary(@NonNull WordVectors wordVectors, boolean fetchLabels) {
+        return buildMergedVocabulary((VocabCache<T>) wordVectors.vocab(), fetchLabels);
+    }
+
+
+    /**
+     * This method returns total number of sequences passed through VocabConstructor
+     *
+     * @return
+     */
+    public long getNumberOfSequences() {
+        return seqCount.get();
+    }
+
+    /**
+     * This method transfers existing vocabulary into current one
+     *
+     * Please note: this method expects source vocabulary has Huffman tree indexes applied
+     *
+     * @param vocabCache
+     * @return
+     */
+    public VocabCache<T> buildMergedVocabulary(@NonNull VocabCache<T> vocabCache, boolean fetchLabels) {
+        if (cache == null) cache = new AbstractCache.Builder<T>().build();
+        for (int t = 0; t < vocabCache.numWords(); t++) {
+            String label = vocabCache.wordAtIndex(t);
+            if (label == null) continue;
+            T element = vocabCache.wordFor(label);
+
+            // skip this element if it's a label, and user don't want labels to be merged
+            if (!fetchLabels && element.isLabel()) continue;
+
+            cache.addToken(element);
+            cache.addWordToIndex(cache.numWords() - 1, element.getLabel());
+
+            // backward compatibility code
+            cache.putVocabWord(element.getLabel());
+        }
+
+        if (cache.numWords() == 0) throw new IllegalStateException("Source VocabCache has no indexes available, transfer is impossible");
+
+        /*
+            Now, when we have transferred vocab, we should roll over iterator, and  gather labels, if any
+         */
+        if (fetchLabels) {
+            for(VocabSource<T> source: sources) {
+                SequenceIterator<T> iterator = source.getIterator();
+                iterator.reset();
+
+                while (iterator.hasMoreSequences()) {
+                    Sequence<T> sequence = iterator.nextSequence();
+                    seqCount.incrementAndGet();
+
+                    for (T label: sequence.getSequenceLabels()) {
+                        if (!cache.containsWord(label.getLabel())) {
+                            cache.addToken(label);
+                            cache.addWordToIndex(cache.numWords() - 1, label.getLabel());
+
+                            // backward compatibility code
+                            cache.putVocabWord(label.getLabel());
+                        }
+                    }
+                }
+            }
+        }
+
+        return cache;
+    }
+
+
+    /**
      * This method scans all sources passed through builder, and returns all words as vocab.
      * If TargetVocabCache was set during instance creation, it'll be filled too.
      *
@@ -65,10 +146,8 @@ public class VocabConstructor<T extends SequenceElement> {
     public VocabCache<T> buildJointVocabulary(boolean resetCounters, boolean buildHuffmanTree) {
         if (resetCounters && buildHuffmanTree) throw new IllegalStateException("You can't reset counters and build Huffman tree at the same time!");
 
-        if (cache == null) throw new IllegalStateException("Cache is null, building fresh one");
         if (cache == null) cache = new AbstractCache.Builder<T>().build();
         log.debug("Target vocab size before building: [" + cache.numWords() + "]");
-        final AtomicLong sequenceCounter = new AtomicLong(0);
         final AtomicLong elementsCounter = new AtomicLong(0);
 
         AbstractCache<T> topHolder = new AbstractCache.Builder<T>()
@@ -90,7 +169,7 @@ public class VocabConstructor<T extends SequenceElement> {
             long counter = 0;
             while (iterator.hasMoreSequences()) {
                 Sequence<T> document = iterator.nextSequence();
-                sequenceCounter.incrementAndGet();
+                seqCount.incrementAndGet();
               //  log.info("Sequence length: ["+ document.getElements().size()+"]");
              //   Tokenizer tokenizer = tokenizerFactory.create(document.getContent());
 
@@ -100,6 +179,7 @@ public class VocabConstructor<T extends SequenceElement> {
                 if (fetchLabels) {
                     T labelWord = document.getSequenceLabel();
                     labelWord.setSpecial(true);
+                    labelWord.markAsLabel(true);
                     labelWord.setElementFrequency(1);
 
                     tempHolder.addToken(labelWord);
@@ -131,14 +211,14 @@ public class VocabConstructor<T extends SequenceElement> {
                 }
 
                 sequences++;
-                if (sequenceCounter.get() % 100000 == 0) log.info("Sequences checked: [" + sequenceCounter.get() +"], Current vocabulary size: [" + elementsCounter.get() +"]");
+                if (seqCount.get() % 100000 == 0) log.info("Sequences checked: [" + seqCount.get() +"], Current vocabulary size: [" + elementsCounter.get() +"]");
             }
             // apply minWordFrequency set for this source
             log.debug("Vocab size before truncation: [" + tempHolder.numWords() + "],  NumWords: [" + tempHolder.totalWordOccurrences()+ "], sequences parsed: [" + sequences+ "], counter: ["+counter+"]");
             if (source.getMinWordFrequency() > 0) {
                 LinkedBlockingQueue<String> labelsToRemove = new LinkedBlockingQueue<>();
                 for (T element : tempHolder.vocabWords()) {
-                    if (element.getElementFrequency() < source.getMinWordFrequency() && !element.isSpecial())
+                    if (element.getElementFrequency() < source.getMinWordFrequency() && !element.isSpecial() && !element.isLabel())
                         labelsToRemove.add(element.getLabel());
                 }
 
@@ -173,9 +253,21 @@ public class VocabConstructor<T extends SequenceElement> {
             huffman.build();
             huffman.applyIndexes(cache);
             //topHolder.updateHuffmanCodes();
+
+            if (limit > 0) {
+                LinkedBlockingQueue<String> labelsToRemove = new LinkedBlockingQueue<>();
+                for (T element : cache.vocabWords()) {
+                    if (element.getIndex() > limit && !element.isSpecial() && !element.isLabel())
+                        labelsToRemove.add(element.getLabel());
+                }
+
+                for (String label: labelsToRemove) {
+                    cache.removeElement(label);
+                }
+            }
         }
 
-        log.info("Sequences checked: [" + sequenceCounter.get() +"], Current vocabulary size: [" + cache.numWords() +"]");
+        log.info("Sequences checked: [" + seqCount.get() +"], Current vocabulary size: [" + cache.numWords() +"]");
         return cache;
     }
 
@@ -185,9 +277,23 @@ public class VocabConstructor<T extends SequenceElement> {
         private List<String> stopWords = new ArrayList<>();
         private boolean useAdaGrad = false;
         private boolean fetchLabels = false;
+        private int limit;
 
         public Builder() {
 
+        }
+
+        /**
+         * This method sets the limit to resulting vocabulary size.
+         *
+         * PLEASE NOTE:  This method is applicable only if huffman tree is built.
+         *
+         * @param limit
+         * @return
+         */
+        public Builder<T> setEntriesLimit(int limit) {
+            this.limit = limit;
+            return this;
         }
 
         /**
@@ -264,6 +370,7 @@ public class VocabConstructor<T extends SequenceElement> {
             constructor.stopWords = this.stopWords;
             constructor.useAdaGrad = this.useAdaGrad;
             constructor.fetchLabels = this.fetchLabels;
+            constructor.limit = this.limit;
 
             return constructor;
         }

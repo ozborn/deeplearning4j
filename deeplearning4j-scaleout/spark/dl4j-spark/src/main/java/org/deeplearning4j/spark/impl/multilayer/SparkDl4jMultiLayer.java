@@ -21,6 +21,7 @@ package org.deeplearning4j.spark.impl.multilayer;
 import org.apache.spark.Accumulator;
 import org.apache.spark.SparkContext;
 import org.apache.spark.api.java.JavaDoubleRDD;
+import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.DoubleFunction;
@@ -49,7 +50,10 @@ import org.deeplearning4j.spark.impl.common.misc.UpdaterFromTupleFunction;
 import org.deeplearning4j.spark.impl.common.updater.UpdaterAggregatorCombiner;
 import org.deeplearning4j.spark.impl.common.updater.UpdaterElementCombiner;
 import org.deeplearning4j.spark.impl.multilayer.evaluation.EvaluateFlatMapFunction;
+import org.deeplearning4j.spark.impl.multilayer.evaluation.EvaluationReduceFunction;
 import org.deeplearning4j.spark.impl.multilayer.gradientaccum.GradientAccumFlatMap;
+import org.deeplearning4j.spark.impl.multilayer.scoring.ScoreExamplesFunction;
+import org.deeplearning4j.spark.impl.multilayer.scoring.ScoreExamplesWithKeyFunction;
 import org.deeplearning4j.spark.util.MLLibUtil;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.dataset.DataSet;
@@ -59,7 +63,6 @@ import scala.Tuple2;
 import scala.Tuple3;
 
 import java.io.Serializable;
-import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -69,6 +72,7 @@ import java.util.List;
  */
 public class SparkDl4jMultiLayer implements Serializable {
 
+    public static final int DEFAULT_EVAL_SCORE_BATCH_SIZE = 50;
     private transient SparkContext sparkContext;
     private transient JavaSparkContext sc;
     private MultiLayerConfiguration conf;
@@ -138,7 +142,7 @@ public class SparkDl4jMultiLayer implements Serializable {
      * @param labelIndex the label index
      * @param recordReader the record reader to parse results
      * @return {@link MultiLayerNetwork}
-     * @see #fit(String, int, RecordReader, int)
+     * @see #fit(String, int, RecordReader, int, int, int)
      */
     public MultiLayerNetwork fit(String path,int labelIndex,RecordReader recordReader) {
         JavaRDD<DataSet> points = loadFromTextFile(path, labelIndex, recordReader);
@@ -147,16 +151,41 @@ public class SparkDl4jMultiLayer implements Serializable {
 
     /**Train a multi layer network based on data loaded from a text file + {@link RecordReader}.
      * This method splits the data into approximately {@code examplesPerFit} sized splits, and trains on each split.
-     * one after the other. See {@link #fitDataSet(JavaRDD, int)} for further details.
+     * one after the other. See {@link #fitDataSet(JavaRDD, int, int, int)} for further details.<br>
+     * Note: Compared to {@link #fit(String, int, RecordReader, int, int, int)}, this method persists and then counts the data set
+     * size directly. This is usually OK, though if the data set does not fit in memory, this can result in some overhead due
+     * to the data being loaded multiple times (once for count, once for fitting), as compared to providing the data set
+     * size to the {@link #fit(String, int, RecordReader, int, int, int)} method
      * @param path the path to the text file
      * @param labelIndex the label index
      * @param recordReader the record reader to parse results
      * @param examplesPerFit Number of examples to fit on at each iteration
+     * @param numPartitions Number of partitions to divide each subset of the data into (for best results, this  should be
+     *                      equal to the number of executors)
      * @return {@link MultiLayerNetwork}
      */
-    public MultiLayerNetwork fit(String path,int labelIndex,RecordReader recordReader, int examplesPerFit ) {
+    public MultiLayerNetwork fit(String path, int labelIndex, RecordReader recordReader, int examplesPerFit, int numPartitions){
         JavaRDD<DataSet> points = loadFromTextFile(path, labelIndex, recordReader);
-        return fitDataSet(points, examplesPerFit);
+        points.cache();
+        int count = (int)points.count();
+        return fitDataSet(points, examplesPerFit, count, numPartitions);
+    }
+
+    /**Train a multi layer network based on data loaded from a text file + {@link RecordReader}.
+     * This method splits the data into approximately {@code examplesPerFit} sized splits, and trains on each split.
+     * one after the other. See {@link #fitDataSet(JavaRDD, int, int, int)} for further details.
+     * @param path the path to the text file
+     * @param labelIndex the label index
+     * @param recordReader the record reader to parse results
+     * @param examplesPerFit Number of examples to fit on at each iteration (divided between all executors)
+     * @param numPartitions Number of partitions to divide each subset of the data into (for best results, this  should be
+     *                      equal to the number of executors)
+     * @return {@link MultiLayerNetwork}
+     * @see #fit(String, int, RecordReader, int, int)
+     */
+    public MultiLayerNetwork fit(String path,int labelIndex,RecordReader recordReader, int examplesPerFit, int totalExamples, int numPartitions ) {
+        JavaRDD<DataSet> points = loadFromTextFile(path, labelIndex, recordReader);
+        return fitDataSet(points, examplesPerFit, totalExamples, numPartitions);
     }
 
     private JavaRDD<DataSet> loadFromTextFile(String path, int labelIndex, RecordReader recordReader ){
@@ -219,6 +248,27 @@ public class SparkDl4jMultiLayer implements Serializable {
         return fitDataSet(MLLibUtil.fromLabeledPoint(sc, rdd, outputLayer.getNOut()));
     }
 
+    /** Equivalent to {@link #fitDataSet(JavaRDD, int, int, int)}, but persist and count the size of the data set first,
+     * instead of requiring the data set size to be provided externally.
+     * <b>Note</b>: In some cases, it may be more efficient to count the size of the data set earlier in the pipeline and
+     * provide this count to the {@link #fitDataSet(JavaRDD, int, int, int)} method, as counting on the {@code JavaRDD<DataSet>}
+     * requires a full pass of the data pipeline. In cases where the entire {@code JavaRDD<DataSet>} does not fit in memory, this
+     * approach can result in multiple passes being done over the data, potentially degrading performance
+     * @param rdd Data to train on
+     * @param examplesPerFit Number of examples to learn on (between averaging) across all executors. For example, if set to
+     *                       1000 and rdd.count() == 10k, then we do 10 sets of learning, each on 1000 examples.
+     *                       To use all examples, set maxExamplesPerFit to Integer.MAX_VALUE
+     * @param numPartitions number of partitions to divide the data in to. For  best results, this should be equal to the number
+     *                      of executors
+     * @return Trained network
+     */
+    public MultiLayerNetwork fitDataSet(JavaRDD<DataSet> rdd, int examplesPerFit, int numPartitions ){
+        rdd.cache();
+        int count = (int)rdd.count();
+
+        return fitDataSet(rdd, examplesPerFit, count, numPartitions);
+    }
+
     /**Fit the data, splitting into smaller data subsets if necessary. This allows large {@code JavaRDD<DataSet>}s)
      * to be trained as a set of smaller steps instead of all together.<br>
      * Using this method, training progresses as follows:<br>
@@ -233,17 +283,19 @@ public class SparkDl4jMultiLayer implements Serializable {
      * @param examplesPerFit Number of examples to learn on (between averaging) across all executors. For example, if set to
      *                       1000 and rdd.count() == 10k, then we do 10 sets of learning, each on 1000 examples.
      *                       To use all examples, set maxExamplesPerFit to Integer.MAX_VALUE
+     * @param totalExamples total number of examples in the data RDD
+     * @param numPartitions number of partitions to divide the data in to. For best results, this should be equal to the
+     *                      number of executors
      * @return Trained network
      */
-    public MultiLayerNetwork fitDataSet(JavaRDD<DataSet> rdd, int examplesPerFit ){
+    public MultiLayerNetwork fitDataSet(JavaRDD<DataSet> rdd, int examplesPerFit, int totalExamples, int numPartitions ){
         int nSplits;
-        if(examplesPerFit == Integer.MAX_VALUE) nSplits = 1;
+        if(examplesPerFit == Integer.MAX_VALUE || examplesPerFit >= totalExamples ) nSplits = 1;
         else {
-            long nExamples = rdd.count();
-            if(nExamples%examplesPerFit==0){
-                nSplits = (int)(nExamples / examplesPerFit);
+            if(totalExamples%examplesPerFit==0){
+                nSplits = (totalExamples / examplesPerFit);
             } else {
-                nSplits = (int)(nExamples / examplesPerFit) + 1;
+                nSplits = (totalExamples/ examplesPerFit) + 1;
             }
         }
 
@@ -254,8 +306,9 @@ public class SparkDl4jMultiLayer implements Serializable {
             for( int i=0; i<nSplits; i++ ) splitWeights[i] = 1.0 / nSplits;
             JavaRDD<DataSet>[] subsets = rdd.randomSplit(splitWeights);
             for( int i=0; i<subsets.length; i++ ){
-                log.info("Initiating distributed training of subset {} of {}",(i+1),subsets.length);
-                fitDataSet(subsets[i]);
+                log.info("Initiating distributed training of subset {} of {}", (i + 1), subsets.length);
+                JavaRDD<DataSet> next = subsets[i].repartition(numPartitions);
+                fitDataSet(next);
             }
         }
         return network;
@@ -268,7 +321,7 @@ public class SparkDl4jMultiLayer implements Serializable {
      */
     public MultiLayerNetwork fitDataSet(JavaRDD<DataSet> rdd) {
         int iterations = conf.getConf(0).getNumIterations();
-        log.info("Running distributed training:  (averaging each iteration = " + averageEachIteration + "), (iterations =" +
+        log.info("Running distributed training:  (averaging each iteration = " + averageEachIteration + "), (iterations = " +
                 iterations + "), (num partions = " + rdd.partitions().size() + ")");
         if(!averageEachIteration) {
             //Do multiple iterations and average once at the end
@@ -295,9 +348,12 @@ public class SparkDl4jMultiLayer implements Serializable {
         return network;
     }
 
-    private void runIteration(JavaRDD<DataSet> rdd) {
 
-        log.info("Broadcasting initial parameters of length " + network.numParams(false));
+    protected void runIteration(JavaRDD<DataSet> rdd) {
+        int paramsLength = network.numParams(false);
+
+        log.info("Broadcasting initial parameters of length " + paramsLength);
+
         INDArray valToBroadcast = network.params(false);
         this.params = sc.broadcast(valToBroadcast);
         Updater updater = network.getUpdater();
@@ -308,17 +364,13 @@ public class SparkDl4jMultiLayer implements Serializable {
         }
         this.updater = sc.broadcast(updater);
 
-
-        int paramsLength = network.numParams(false);
         boolean accumGrad = sc.getConf().getBoolean(ACCUM_GRADIENT, false);
-
-
         if(accumGrad) {
             //Learning via averaging gradients
             JavaRDD<Tuple2<Gradient,Updater>> results = rdd.mapPartitions(new GradientAccumFlatMap(conf.toJson(), this.params, this.updater),true).cache();
-            log.info("Ran iterative reduce...averaging results now.");
 
             JavaRDD<Gradient> resultsGradient = results.map(new GradientFromTupleFunction());
+            log.info("Ran iterative reduce... averaging results now.");
 
             GradientAdder a = new GradientAdder(paramsLength);
             resultsGradient.foreach(a);
@@ -345,23 +397,20 @@ public class SparkDl4jMultiLayer implements Serializable {
         }
         else {
             //Standard parameter averaging
-            JavaRDD<Tuple3<INDArray,Updater,Double>> results = rdd.mapPartitions(new IterativeReduceFlatMap(conf.toJson(),
-                    this.params, this.updater, this.bestScoreAcc),true).cache();
+            JavaRDD<Tuple3<INDArray,Updater,Double>> results = rdd.mapPartitions(new IterativeReduceFlatMap(
+                    conf.toJson(), this.params, this.updater, this.bestScoreAcc),true).cache();
 
             JavaRDD<INDArray> resultsParams = results.map(new INDArrayFromTupleFunction());
-            log.info("Ran iterative reduce... averaging parameters now.");
-            Adder a = new Adder(paramsLength);
+            log.info("Running iterative reduce and averaging parameters");
+
+            Adder a = new Adder(paramsLength,sc.accumulator(0));
             resultsParams.foreach(a);
+
             INDArray newParams = a.getAccumulator().value();
-            log.info("Accumulated parameters");
-            newParams.divi(rdd.partitions().size());
-            log.info("Divided by partitions");
+            newParams.divi(a.getCounter().value());
+
             network.setParameters(newParams);
-            log.info("Set parameters");
-
-            log.info("Processing updaters");
-            JavaRDD<Updater> resultsUpdater = results.map(new UpdaterFromTupleFunction());
-
+            log.info("Accumulated and set parameters");
             JavaDoubleRDD scores = results.mapToDouble(new DoubleFunction<Tuple3<INDArray,Updater,Double>>(){
                 @Override
                 public double call(Tuple3<INDArray, Updater, Double> t3) throws Exception {
@@ -370,6 +419,7 @@ public class SparkDl4jMultiLayer implements Serializable {
             });
             lastScore = scores.mean();
 
+            JavaRDD<Updater> resultsUpdater = results.map(new UpdaterFromTupleFunction());
             UpdaterAggregator aggregator = resultsUpdater.aggregate(
                     null,
                     new UpdaterElementCombiner(),
@@ -377,11 +427,11 @@ public class SparkDl4jMultiLayer implements Serializable {
             );
             Updater combinedUpdater = aggregator.getUpdater();
             network.setUpdater(combinedUpdater);
-            log.info("Set updater");
+
+            log.info("Processed and set updater");
 
         }
     }
-
 
     /**
      * Train a multi layer network
@@ -390,8 +440,9 @@ public class SparkDl4jMultiLayer implements Serializable {
      * @return the fit multi layer network
      */
     public static MultiLayerNetwork train(JavaRDD<LabeledPoint> data,MultiLayerConfiguration conf) {
+
         SparkDl4jMultiLayer multiLayer = new SparkDl4jMultiLayer(data.context(),conf);
-        return multiLayer.fit(new JavaSparkContext(data.context()),data);
+        return multiLayer.fit(new JavaSparkContext(data.context()), data);
     }
 
     /** Gets the last (average) minibatch score from calling fit */
@@ -409,35 +460,94 @@ public class SparkDl4jMultiLayer implements Serializable {
         return sum;
     }
 
-    public Evaluation evaluate(JavaRDD<DataSet> data, int maxExamplesPerEvaluation) {
-        return evaluate(data, maxExamplesPerEvaluation, null, false);
+    /** Score the examples individually, using the default batch size {@link #DEFAULT_EVAL_SCORE_BATCH_SIZE}. Unlike {@link #calculateScore(JavaRDD, boolean)},
+     * this method returns a score for each example separately. If scoring is needed for specific examples use either
+     * {@link #scoreExamples(JavaPairRDD, boolean)} or {@link #scoreExamples(JavaPairRDD, boolean, int)} which can have
+     * a key for each example.
+     * @param data Data to score
+     * @param includeRegularizationTerms If  true: include the l1/l2 regularization terms with the score (if any)
+     * @return A JavaDoubleRDD containing the scores of each example
+     * @see MultiLayerNetwork#scoreExamples(DataSet, boolean)
+     */
+    public JavaDoubleRDD scoreExamples(JavaRDD<DataSet> data, boolean includeRegularizationTerms) {
+        return scoreExamples(data,includeRegularizationTerms,DEFAULT_EVAL_SCORE_BATCH_SIZE);
     }
 
-    public Evaluation evaluate(JavaRDD<DataSet> data, int maxExamplesPerEvaluation, boolean warnNotClassified) {
-        return evaluate(data, maxExamplesPerEvaluation, null, warnNotClassified);
+    /** Score the examples individually, using a specified batch size. Unlike {@link #calculateScore(JavaRDD, boolean)},
+     * this method returns a score for each example separately. If scoring is needed for specific examples use either
+     * {@link #scoreExamples(JavaPairRDD, boolean)} or {@link #scoreExamples(JavaPairRDD, boolean, int)} which can have
+     * a key for each example.
+     * @param data Data to score
+     * @param includeRegularizationTerms If  true: include the l1/l2 regularization terms with the score (if any)
+     * @param batchSize Batch size to use when doing scoring
+     * @return A JavaDoubleRDD containing the scores of each example
+     * @see MultiLayerNetwork#scoreExamples(DataSet, boolean)
+     */
+    public JavaDoubleRDD scoreExamples(JavaRDD<DataSet> data, boolean includeRegularizationTerms, int batchSize) {
+        return data.mapPartitionsToDouble(new ScoreExamplesFunction(sc.broadcast(network.params()), sc.broadcast(conf.toJson()),
+                includeRegularizationTerms, batchSize));
     }
 
-    /**Evaluate the network (classification performance) in a distributed manner.
+    /** Score the examples individually, using the default batch size {@link #DEFAULT_EVAL_SCORE_BATCH_SIZE}. Unlike {@link #calculateScore(JavaRDD, boolean)},
+     * this method returns a score for each example separately<br>
+     * Note: The provided JavaPairRDD has a key that is associated with each example and returned score.<br>
+     * <b>Note:</b> The DataSet objects passed in must have exactly one example in them (otherwise: can't have a 1:1 association
+     * between keys and data sets to score)
+     * @param data Data to score
+     * @param includeRegularizationTerms If  true: include the l1/l2 regularization terms with the score (if any)
+     * @param <K> Key type
+     * @return A {@code JavaPairRDD<K,Double>} containing the scores of each example
+     * @see MultiLayerNetwork#scoreExamples(DataSet, boolean)
+     */
+    public <K> JavaPairRDD<K,Double> scoreExamples(JavaPairRDD<K,DataSet> data, boolean includeRegularizationTerms){
+        return scoreExamples(data,includeRegularizationTerms,DEFAULT_EVAL_SCORE_BATCH_SIZE);
+    }
+
+    /** Score the examples individually, using a specified batch size. Unlike {@link #calculateScore(JavaRDD, boolean)},
+     * this method returns a score for each example separately<br>
+     * Note: The provided JavaPairRDD has a key that is associated with each example and returned score.<br>
+     * <b>Note:</b> The DataSet objects passed in must have exactly one example in them (otherwise: can't have a 1:1 association
+     * between keys and data sets to score)
+     * @param data Data to score
+     * @param includeRegularizationTerms If  true: include the l1/l2 regularization terms with the score (if any)
+     * @param <K> Key type
+     * @return A {@code JavaPairRDD<K,Double>} containing the scores of each example
+     * @see MultiLayerNetwork#scoreExamples(DataSet, boolean)
+     */
+    public <K> JavaPairRDD<K,Double> scoreExamples(JavaPairRDD<K,DataSet> data, boolean includeRegularizationTerms, int batchSize ){
+        return data.mapPartitionsToPair(new ScoreExamplesWithKeyFunction<K>(sc.broadcast(network.params()), sc.broadcast(conf.toJson()),
+                includeRegularizationTerms, batchSize));
+    }
+
+    /**Evaluate the network (classification performance) in a distributed manner on the provided data
      * @param data Data to evaluate on
-     * @param maxExamplesPerEvaluation Maximum number of examples to use during each evaluation step. If an executor has
-     *                                 more than maxExamplesPerEvaluation, it will split the data into multiple evaluation
-     *                                 steps. Results should not depend on this number (only affects memory requirements)
      * @return Evaluation object; results of evaluation on all examples in the data set
      */
-    public Evaluation evaluate(JavaRDD<DataSet> data, int maxExamplesPerEvaluation, List<String> labelsList, boolean warnNotClassified){
+    public Evaluation evaluate(JavaRDD<DataSet> data) {
+        return evaluate(data, null);
+    }
 
-        JavaRDD<Evaluation> evaluation = data.mapPartitions(
-                new EvaluateFlatMapFunction(conf.toJson(),sc.broadcast(network.params(false)),maxExamplesPerEvaluation, labelsList, warnNotClassified));
+    /**Evaluate the network (classification performance) in a distributed manner, using default batch size and a provided
+     * list of labels
+     * @param data Data to evaluate on
+     * @param labelsList List of labels used for evaluation
+     * @return Evaluation object; results of evaluation on all examples in the data set
+     */
+    public Evaluation evaluate(JavaRDD<DataSet> data, List<String> labelsList) {
+        return evaluate(data,labelsList, DEFAULT_EVAL_SCORE_BATCH_SIZE);
+    }
 
-        //Evaluation objects are small, and merging is quick -> fine to do this locally
-        List<Evaluation> evaluationList = evaluation.collect();
-        Iterator<Evaluation> evaluationIterator = evaluationList.iterator();
-        Evaluation eval = evaluationIterator.next();
-
-        while(evaluationIterator.hasNext()){
-            eval.merge(evaluationIterator.next());
-        }
-
-        return eval;
+    /**Evaluate the network (classification performance) in a distributed manner, using specified batch size and a provided
+     * list of labels
+     * @param data Data to evaluate on
+     * @param labelsList List of labels used for evaluation
+     * @param evalBatchSize Batch size to use when conducting evaluations
+     * @return Evaluation object; results of evaluation on all examples in the data set
+     */
+    public Evaluation evaluate(JavaRDD<DataSet> data, List<String> labelsList, int evalBatchSize ){
+        Broadcast<List<String>> listBroadcast = (labelsList == null ? null : sc.broadcast(labelsList));
+        JavaRDD<Evaluation> evaluations = data.mapPartitions(new EvaluateFlatMapFunction(sc.broadcast(conf.toJson()),
+                sc.broadcast(network.params()), evalBatchSize, listBroadcast));
+        return evaluations.reduce(new EvaluationReduceFunction());
     }
 }

@@ -26,8 +26,10 @@ import lombok.NonNull;
 import org.apache.commons.compress.compressors.gzip.GzipUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.LineIterator;
-import org.apache.commons.io.output.StringBuilderWriter;
+import org.apache.commons.lang.StringUtils;
 import org.deeplearning4j.berkeley.Pair;
+import org.deeplearning4j.models.embeddings.reader.impl.BasicModelUtils;
+import org.deeplearning4j.models.paragraphvectors.ParagraphVectors;
 import org.deeplearning4j.models.sequencevectors.sequence.SequenceElement;
 import org.deeplearning4j.models.embeddings.WeightLookupTable;
 import org.deeplearning4j.models.embeddings.inmemory.InMemoryLookupTable;
@@ -39,7 +41,9 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
 import org.deeplearning4j.models.word2vec.wordstore.VocabCache;
 import org.deeplearning4j.models.word2vec.wordstore.VocabularyHolder;
 import org.deeplearning4j.models.word2vec.wordstore.VocabularyWord;
+import org.deeplearning4j.models.word2vec.wordstore.inmemory.AbstractCache;
 import org.deeplearning4j.models.word2vec.wordstore.inmemory.InMemoryLookupCache;
+import org.deeplearning4j.text.documentiterator.LabelsSource;
 import org.deeplearning4j.text.sentenceiterator.LineSentenceIterator;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
@@ -96,7 +100,23 @@ public class WordVectorSerializer {
      */
     public static WordVectors loadGoogleModel(File modelFile, boolean binary, boolean lineBreaks)
             throws IOException {
-        return binary ? readBinaryModel(modelFile, lineBreaks) : WordVectorSerializer.fromPair(loadTxt(modelFile));
+        return binary ? readBinaryModel(modelFile, lineBreaks, true) : WordVectorSerializer.fromPair(loadTxt(modelFile));
+    }
+
+    /**
+     *
+     * Loads the Google model without normalization being applied.
+     *
+     * PLEASE NOTE: Use this method only if you understand why you need not-normalized model. In all other cases please use loadGoogleModel() instead.
+     *
+     * @param modelFile
+     * @param binary
+     * @param lineBreaks
+     * @return
+     * @throws IOException
+     */
+    public static WordVectors loadGoogleModelNonNormalized(File modelFile, boolean binary, boolean lineBreaks) throws IOException {
+        return binary ? readBinaryModel(modelFile, lineBreaks, false) : WordVectorSerializer.fromPair(loadTxt(modelFile));
     }
 
     /**
@@ -167,7 +187,7 @@ public class WordVectorSerializer {
      * @throws IOException
      * @throws FileNotFoundException
      */
-    private static Word2Vec readBinaryModel(File modelFile, boolean linebreaks)
+    private static Word2Vec readBinaryModel(File modelFile, boolean linebreaks, boolean normalize)
             throws NumberFormatException, IOException
     {
         InMemoryLookupTable<VocabWord> lookupTable;
@@ -200,7 +220,7 @@ public class WordVectorSerializer {
                 }
 
 
-                syn0.putRow(i, Transforms.unitVec(Nd4j.create(vector)));
+                syn0.putRow(i, normalize ? Transforms.unitVec(Nd4j.create(vector)) : Nd4j.create(vector));
 
                 cache.addToken(new VocabWord(1, word));
                 cache.addWordToIndex(cache.numWords(), word);
@@ -293,9 +313,42 @@ public class WordVectorSerializer {
      * @param <T>
      */
     public static <T extends SequenceElement> void writeWordVectors(WeightLookupTable<T> lookupTable, String path) throws IOException {
+        try {
+            writeWordVectors(lookupTable, new FileOutputStream(path));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * This mehod writes word vectors to the given file.
+     * Please note: this method doesn't load whole vocab/lookupTable into memory, so it's able to process large vocabularies served over network.
+     *
+     * @param lookupTable
+     * @param file
+     * @param <T>
+     */
+    public static <T extends SequenceElement> void writeWordVectors(WeightLookupTable<T> lookupTable, File file) throws IOException {
+        try {
+            writeWordVectors(lookupTable, new FileOutputStream(file));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * This mehod writes word vectors to the given OutputStream.
+     * Please note: this method doesn't load whole vocab/lookupTable into memory, so it's able to process large vocabularies served over network.
+     *
+     * @param lookupTable
+     * @param stream
+     * @param <T>
+     * @throws IOException
+     */
+    public static <T extends SequenceElement> void writeWordVectors(WeightLookupTable<T> lookupTable, OutputStream stream) throws IOException {
         VocabCache<T> vocabCache = lookupTable.getVocabCache();
 
-        PrintWriter writer = new PrintWriter(new File(path));
+        PrintWriter writer = new PrintWriter(stream);
 
         for (int x = 0; x < vocabCache.numWords(); x++) {
             T element = vocabCache.elementAtIndex(x);
@@ -312,6 +365,219 @@ public class WordVectorSerializer {
         }
         writer.flush();
         writer.close();
+    }
+
+
+    /**
+     * This method saves paragraph vectors to the given file.
+     *
+     * @param vectors
+     * @param path
+     */
+    public static void writeWordVectors(@NonNull ParagraphVectors vectors, @NonNull File path) {
+        try (FileOutputStream fos = new FileOutputStream(path)) {
+            writeWordVectors(vectors, fos);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
+    /**
+     * This method saves paragraph vectors to the given path.
+     *
+     * @param vectors
+     * @param path
+     */
+    public static void writeWordVectors(@NonNull ParagraphVectors vectors, @NonNull String path) {
+        try (FileOutputStream fos = new FileOutputStream(path)) {
+            writeWordVectors(vectors, fos);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
+    /**
+     * Restores previously serialized ParagraphVectors model
+     *
+     * @param path Path to file that contains previously serialized model
+     * @return
+     */
+    public static ParagraphVectors readParagraphVectorsFromText(@NonNull String path) {
+        try {
+            return readParagraphVectorsFromText(new FileInputStream(path));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Restores previously serialized ParagraphVectors model
+     *
+     * @param file File that contains previously serialized model
+     * @return
+     */
+    public static ParagraphVectors readParagraphVectorsFromText(@NonNull File file) {
+        try {
+            return readParagraphVectorsFromText(new FileInputStream(file));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
+    /**
+     * Restores previously serialized ParagraphVectors model
+     *
+     * @param stream InputStream that contains previously serialized model
+     * @return
+     */
+    public static ParagraphVectors readParagraphVectorsFromText(@NonNull InputStream stream) {
+        try {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
+            ArrayList<String> labels = new ArrayList<>();
+            ArrayList<INDArray> arrays = new ArrayList<>();
+            VocabCache<VocabWord> vocabCache = new AbstractCache.Builder<VocabWord>().build();
+            String line = "";
+            while ((line = reader.readLine()) != null) {
+                String[] split = line.split(" ");
+                VocabWord word = new VocabWord(1.0, split[1]);
+                if (split[0].equals("L")) {
+                    // we have label element here
+                    word.setSpecial(true);
+                    word.markAsLabel(true);
+                    labels.add(word.getLabel());
+                } else if (split[0].equals("E")) {
+                    // we have usual element, aka word here
+                    word.setSpecial(false);
+                    word.markAsLabel(false);
+                } else throw new IllegalStateException("Source stream doesn't looks like ParagraphVectors serialized model");
+
+                // this particular line is just for backward compatibility with InMemoryLookupCache
+                word.setIndex(vocabCache.numWords());
+
+                vocabCache.addToken(word);
+                vocabCache.addWordToIndex(word.getIndex(), word.getLabel());
+
+                // backward compatibility code
+                vocabCache.putVocabWord(word.getLabel());
+
+                INDArray row = Nd4j.create(1, split.length - 2);
+                for (int i = 2; i < split.length; i++) {
+                    row.putScalar(i - 2, Float.parseFloat(split[i]));
+                }
+
+                arrays.add(row);
+            }
+
+            // now we create syn0 matrix, using previously fetched rows
+            INDArray syn = Nd4j.create(new int[]{arrays.size(), arrays.get(0).columns()});
+            for (int i = 0; i < syn.rows(); i++) {
+                syn.putRow(i, arrays.get(i));
+            }
+
+
+            InMemoryLookupTable<VocabWord> lookupTable = (InMemoryLookupTable<VocabWord>) new InMemoryLookupTable.Builder<VocabWord>()
+                    .vectorLength(arrays.get(0).columns())
+                    .useAdaGrad(false)
+                    .cache(vocabCache)
+                    .build();
+            Nd4j.clearNans(syn);
+            lookupTable.setSyn0(syn);
+
+            LabelsSource source = new LabelsSource(labels);
+            ParagraphVectors vectors = new ParagraphVectors.Builder()
+                    .labelsSource(source)
+                    .vocabCache(vocabCache)
+                    .lookupTable(lookupTable)
+                    .modelUtils(new BasicModelUtils<VocabWord>())
+                    .build();
+
+            return vectors;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * This method saves GloVe model to the given output stream.
+     *
+     * @param vectors GloVe model to be saved
+     * @param file path where model should be saved to
+     */
+    public static void writeWordVectors(@NonNull Glove vectors, @NonNull File file) {
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            writeWordVectors(vectors, fos);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * This method saves GloVe model to the given output stream.
+     *
+     * @param vectors GloVe model to be saved
+     * @param path path where model should be saved to
+     */
+    public static void writeWordVectors(@NonNull Glove vectors, @NonNull String path) {
+        try (FileOutputStream fos = new FileOutputStream(path)) {
+            writeWordVectors(vectors, fos);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * This method saves GloVe model to the given OutputStream
+     *
+     * @param vectors GloVe model to be saved
+     * @param stream OutputStream where model should be saved to
+     */
+    public static void writeWordVectors(@NonNull Glove vectors, @NonNull OutputStream stream) {
+        try {
+            writeWordVectors(vectors.lookupTable(), stream);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * This method saves paragraph vectors to the given output stream.
+     *
+     * @param vectors
+     * @param stream
+     */
+    public static void writeWordVectors(ParagraphVectors vectors, OutputStream stream) {
+
+        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(stream))) {
+        /*
+            This method acts similary to w2v csv serialization, except of additional tag for labels
+         */
+
+            VocabCache<VocabWord> vocabCache = vectors.getVocab();
+            for (VocabWord word : vocabCache.vocabWords()) {
+                StringBuilder builder = new StringBuilder();
+
+                builder.append(word.isLabel() ? "L" : "E").append(" ");
+                builder.append(word.getLabel().replaceAll(" ", "_")).append(" ");
+
+                INDArray vector = vectors.getWordVectorMatrix(word.getLabel());
+                for (int j = 0; j < vector.length(); j++) {
+                    builder.append(vector.getDouble(j));
+                    if (j < vector.length() - 1) {
+                        builder.append(" ");
+                    }
+                }
+
+                writer.write(builder.append("\n").toString());
+            }
+
+            writer.flush();
+            writer.close();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -382,19 +648,15 @@ public class WordVectorSerializer {
             throw new RuntimeException(e);
         }
 
-        WeightLookupTable lookupTable = vec.getLookupTable();
-        VocabCache vocabCache = vec.getVocab(); // ((InMemoryLookupTable) lookupTable).getVocab(); //vec.getVocab();
+        WeightLookupTable<VocabWord> lookupTable = vec.getLookupTable();
+        VocabCache<VocabWord> vocabCache = vec.getVocab(); // ((InMemoryLookupTable) lookupTable).getVocab(); //vec.getVocab();
 
 
         if (!(lookupTable instanceof InMemoryLookupTable)) throw new IllegalStateException("At this moment only InMemoryLookupTable is supported.");
-     //   if (!(vocabCache instanceof InMemoryLookupCache)) throw new IllegalStateException("At this moment only InMemoryLookupCache is supported.");
 
         VectorsConfiguration conf = vec.getConfiguration();
         conf.setVocabSize(vocabCache.numWords());
 
-        VocabularyHolder holder = new VocabularyHolder.Builder()
-                .externalCache(vocabCache)
-                .build();
 
         printWriter.println(conf.toJson());
         log.info("Word2Vec conf. JSON: " + conf.toJson());
@@ -571,11 +833,15 @@ public class WordVectorSerializer {
             }
         }
 
-        return new Word2Vec.Builder(configuration)
+        Word2Vec vec = new Word2Vec.Builder(configuration)
                 .vocabCache(vocabCache)
                 .lookupTable(lookupTable)
                 .resetModel(false)
                 .build();
+
+        vec.setModelUtils(new BasicModelUtils());
+
+        return vec;
     }
 
     /**
@@ -664,6 +930,7 @@ public class WordVectorSerializer {
         WordVectorsImpl vectors = new WordVectorsImpl();
         vectors.setLookupTable(table);
         vectors.setVocab(vocab);
+        vectors.setModelUtils(new BasicModelUtils());
         return vectors;
     }
 
@@ -679,6 +946,7 @@ public class WordVectorSerializer {
         WordVectorsImpl vectors = new WordVectorsImpl();
         vectors.setLookupTable(pair.getFirst());
         vectors.setVocab(pair.getSecond());
+        vectors.setModelUtils(new BasicModelUtils());
         return vectors;
     }
 
@@ -708,7 +976,7 @@ public class WordVectorSerializer {
     public static Pair<InMemoryLookupTable, VocabCache> loadTxt(File vectorsFile)
             throws FileNotFoundException {
         BufferedReader reader = new BufferedReader(new FileReader(vectorsFile));
-        VocabCache cache = new InMemoryLookupCache();
+        VocabCache cache = new AbstractCache<>();
 
         LineIterator iter = IOUtils.lineIterator(reader);
         String line = null;
@@ -716,38 +984,62 @@ public class WordVectorSerializer {
         if (iter.hasNext()) {
             line = iter.nextLine();    // skip header line
             //look for spaces
-            if(!line.contains(" "))
+            if(!line.contains(" ")) {
+                log.info("Skipping first line");
                 hasHeader = true;
+            } else {
+                // we should check for something that looks like proper word vectors here. i.e: 1 word at the 0 position, and bunch of floats further
+                String[] split = line.split(" ");
+                try {
+                    for (int x = 1; x < split.length; x++) {
+                        double val = Double.parseDouble(split[x]);
+                    }
+                    if (split.length < 4) hasHeader = true;
+                } catch (Exception e) {
+                    // if any conversion exception hits - that'll be considered header
+                    hasHeader = true;
+                }
+            }
 
         }
 
         //reposition buffer to be one line ahead
         if(hasHeader) {
+            line = "";
             iter.close();
+            reader = new BufferedReader(new FileReader(vectorsFile));
             iter = IOUtils.lineIterator(reader);
             iter.nextLine();
         }
 
         List<INDArray> arrays = new ArrayList<>();
         while (iter.hasNext()) {
-            line = iter.nextLine();
+            if (line.isEmpty()) line = iter.nextLine();
             String[] split = line.split(" ");
             String word = split[0];
             VocabWord word1 = new VocabWord(1.0, word);
-            cache.addToken(word1);
-            cache.addWordToIndex(cache.numWords(), word);
+
+
             word1.setIndex(cache.numWords());
+
+            cache.addToken(word1);
+
+            cache.addWordToIndex(word1.getIndex(), word);
+
             cache.putVocabWord(word);
             INDArray row = Nd4j.create(Nd4j.createBuffer(split.length - 1));
             for (int i = 1; i < split.length; i++) {
                 row.putScalar(i - 1, Float.parseFloat(split[i]));
             }
             arrays.add(row);
+
+            // workaround for skipped first row
+            line = "";
         }
 
         INDArray syn = Nd4j.create(new int[]{arrays.size(), arrays.get(0).columns()});
         for (int i = 0; i < syn.rows(); i++) {
-            syn.putRow(i, arrays.get(i));
+            syn.putRow(i,arrays.get(i));
         }
 
         InMemoryLookupTable lookupTable = (InMemoryLookupTable) new InMemoryLookupTable.Builder()

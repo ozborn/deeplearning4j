@@ -94,6 +94,7 @@ public class ConvolutionLayerSetupTest {
         new ConvolutionLayerSetup(builder,numRows,numColumns,nChannels);
         DataSet d = new DataSet(Nd4j.rand(10,3,75,75).reshape(10,3 * 75 * 75), FeatureUtil.toOutcomeMatrix(new int[]{1,1,1,1,1,1,1,1,1,1},6));
         MultiLayerNetwork network = new MultiLayerNetwork(builder.build());
+        network.init();
         network.fit(d);
 
     }
@@ -104,14 +105,14 @@ public class ConvolutionLayerSetupTest {
         MultiLayerConfiguration.Builder incomplete = incompleteMnistLenet();
         ConvolutionLayerSetup setup = new ConvolutionLayerSetup(incomplete,28,28,1);
         //first convolution and subsampling
-        assertArrayEquals(new int[]{24,24},setup.getOutSizesEachLayer().get(0));
-        assertArrayEquals(new int[]{12,12},setup.getOutSizesEachLayer().get(1));
+        assertArrayEquals(new int[]{24,24,20},setup.getOutSizesEachLayer().get("0"));
+        assertArrayEquals(new int[]{12,12,20},setup.getOutSizesEachLayer().get("1"));
 
         //second convolution and subsampling
-        assertArrayEquals(new int[]{8,8},setup.getOutSizesEachLayer().get(2));
-        assertArrayEquals(new int[]{4,4},setup.getOutSizesEachLayer().get(3));
-        assertEquals(800, setup.getnInForLayer().get(4).intValue());
-        assertEquals(500, setup.getnInForLayer().get(5).intValue());
+        assertArrayEquals(new int[]{8,8,50},setup.getOutSizesEachLayer().get("2"));
+        assertArrayEquals(new int[]{4,4,50},setup.getOutSizesEachLayer().get("3"));
+        assertEquals(800, setup.getnInForLayer().get("4").intValue());
+        assertEquals(500, setup.getnInForLayer().get("5").intValue());
 
 
         MultiLayerConfiguration testConf = incomplete.build();
@@ -119,6 +120,7 @@ public class ConvolutionLayerSetupTest {
         //test instantiation
         DataSetIterator iter = new MnistDataSetIterator(10,10);
         MultiLayerNetwork network = new MultiLayerNetwork(testConf);
+        network.init();
         network.fit(iter.next());
     }
 
@@ -131,6 +133,7 @@ public class ConvolutionLayerSetupTest {
         RecordReader reader = new ImageRecordReader(28,28,3,true,labels);
         reader.initialize(new FileSplit(new File(rootDir)));
         DataSetIterator recordReader = new RecordReaderDataSetIterator(reader,28 * 28 * 3,labels.size());
+
         labels.remove("lfwtest");
         NeuralNetConfiguration.ListBuilder builder = (NeuralNetConfiguration.ListBuilder) incompleteLFW();
         new ConvolutionLayerSetup(builder,28,28,3);
@@ -139,10 +142,42 @@ public class ConvolutionLayerSetupTest {
         DataSet next = recordReader.next();
         MultiLayerConfiguration conf = builder.build();
         MultiLayerNetwork network = new MultiLayerNetwork(conf);
+        network.init();
         network.fit(next);
 
     }
 
+    @Test
+    public void testLRN() throws Exception{
+        List<String> labels = new ArrayList<>(Arrays.asList("Zico", "Ziwang_Xu"));
+        String rootDir = new ClassPathResource("lfwtest").getFile().getAbsolutePath();
+
+        RecordReader reader = new ImageRecordReader(28,28,3,true,labels);
+        reader.initialize(new FileSplit(new File(rootDir)));
+        DataSetIterator recordReader = new RecordReaderDataSetIterator(reader,28 * 28 * 3,labels.size());
+        labels.remove("lfwtest");
+        NeuralNetConfiguration.ListBuilder builder = (NeuralNetConfiguration.ListBuilder) incompleteLRN();
+        new ConvolutionLayerSetup(builder,28,28,3);
+        ConvolutionLayer layer2 = (ConvolutionLayer) builder.getLayerwise().get(3).getLayer();
+        assertEquals(6, layer2.getNIn());
+
+    }
+
+
+    public MultiLayerConfiguration.Builder incompleteLRN() {
+        MultiLayerConfiguration.Builder builder = new NeuralNetConfiguration.Builder()
+                .seed(3).optimizationAlgo(OptimizationAlgorithm.CONJUGATE_GRADIENT)
+                .list(6)
+                .layer(0, new org.deeplearning4j.nn.conf.layers.ConvolutionLayer.Builder(new int[]{5, 5}).nOut(6)
+                        .build())
+                .layer(1, new org.deeplearning4j.nn.conf.layers.SubsamplingLayer.Builder( new int[]{2, 2}).build())
+                .layer(2, new LocalResponseNormalization.Builder().build())
+                .layer(3, new org.deeplearning4j.nn.conf.layers.ConvolutionLayer.Builder(new int[]{5, 5}).nOut(6)
+                        .build())
+                .layer(4, new org.deeplearning4j.nn.conf.layers.SubsamplingLayer.Builder(new int[]{2, 2}).build())
+                .layer(5, new org.deeplearning4j.nn.conf.layers.OutputLayer.Builder(LossFunctions.LossFunction.NEGATIVELOGLIKELIHOOD).nOut(2).build());
+        return builder;
+    }
 
 
     public MultiLayerConfiguration.Builder incompleteLFW() {
@@ -251,13 +286,33 @@ public class ConvolutionLayerSetupTest {
                         .activation("softmax")
                         .build())
                 .inputPreProcessor(0, new FeedForwardToCnnPreProcessor(numRows, numColumns, 1))
-                .inputPreProcessor(2, new CnnToFeedForwardPreProcessor(5,5,6))
+                .inputPreProcessor(2, new CnnToFeedForwardPreProcessor(5, 5, 6))
                 .backprop(true).pretrain(false);
 
         return builder;
     }
 
+    @Test
+    public void testSubSamplingWithPadding(){
 
+        MultiLayerConfiguration.Builder builder = new NeuralNetConfiguration.Builder()
+                .list(3)
+                .layer(0, new ConvolutionLayer.Builder(2, 2).padding(0, 0).stride(2, 2).nIn(1).nOut(3).build())    //(28-2+0)/2+1 = 14
+                .layer(1, new SubsamplingLayer.Builder().kernelSize(2, 2).padding(1, 1).stride(2, 2).build())      //(14-2+2)/2+1 = 8 -> 8x8x3
+                .layer(2, new OutputLayer.Builder().nOut(3).build());
+        new ConvolutionLayerSetup(builder,28,28,1);
+
+        MultiLayerConfiguration conf = builder.build();
+
+        assertNotNull(conf.getInputPreProcess(2));
+        assertTrue(conf.getInputPreProcess(2) instanceof CnnToFeedForwardPreProcessor);
+        CnnToFeedForwardPreProcessor proc = (CnnToFeedForwardPreProcessor)conf.getInputPreProcess(2);
+        assertEquals(8,proc.getInputHeight());
+        assertEquals(8,proc.getInputWidth());
+        assertEquals(3,proc.getNumChannels());
+
+        assertEquals(8*8*3,((FeedForwardLayer)conf.getConf(2).getLayer()).getNIn());
+    }
 
 
 }

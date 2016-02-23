@@ -20,6 +20,7 @@ package org.deeplearning4j.spark.impl.multilayer;
 
 
 
+import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.mllib.linalg.Vectors;
@@ -44,7 +45,7 @@ import org.nd4j.linalg.dataset.DataSet;
 import org.nd4j.linalg.factory.Nd4j;
 import org.nd4j.linalg.io.ClassPathResource;
 import org.nd4j.linalg.lossfunctions.LossFunctions;
-
+import scala.Tuple2;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -74,7 +75,7 @@ public class TestSparkMultiLayer extends BaseSparkTest {
                 .seed(123)
                 .optimizationAlgo(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT)
                 .iterations(10)
-                .list(2)
+                .list()
                 .layer(0, new DenseLayer.Builder()
                         .nIn(4).nOut(100)
                         .weightInit(WeightInit.XAVIER)
@@ -119,7 +120,7 @@ public class TestSparkMultiLayer extends BaseSparkTest {
                 .optimizationAlgo(OptimizationAlgorithm.LINE_GRADIENT_DESCENT)
                 .iterations(100).miniBatch(true)
                 .maxNumLineSearchIterations(10)
-                .list(2)
+                .list()
                 .layer(0, new RBM.Builder(RBM.HiddenUnit.RECTIFIED, RBM.VisibleUnit.GAUSSIAN)
                         .nIn(4).nOut(100)
                         .weightInit(WeightInit.XAVIER)
@@ -157,7 +158,7 @@ public class TestSparkMultiLayer extends BaseSparkTest {
                 .optimizationAlgo(OptimizationAlgorithm.LINE_GRADIENT_DESCENT)
                 .iterations(100)
                 .maxNumLineSearchIterations(10)
-                .list(2)
+                .list()
                 .layer(0, new RBM.Builder(RBM.HiddenUnit.RECTIFIED, RBM.VisibleUnit.GAUSSIAN)
                         .nIn(4).nOut(3)
                         .weightInit(WeightInit.XAVIER)
@@ -204,7 +205,7 @@ public class TestSparkMultiLayer extends BaseSparkTest {
     public void testStaticInvocation() throws Exception {
         Nd4j.ENFORCE_NUMERICAL_STABILITY = true;
         MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
-                .list(2)
+                .list()
                 .layer(0, new org.deeplearning4j.nn.conf.layers.RBM.Builder()
                         .nIn(4).nOut(3)
                         .activation("tanh").build())
@@ -214,7 +215,7 @@ public class TestSparkMultiLayer extends BaseSparkTest {
                         .build())
                 .build();
 
-        DataSet dataSet = new IrisDataSetIterator(150,150).next();
+        DataSet dataSet = new IrisDataSetIterator(5,5).next();
         List<DataSet> list = dataSet.asList();
         JavaRDD<DataSet> data = sc.parallelize(list);
         JavaRDD<LabeledPoint> mllLibData = MLLibUtil.fromDataSet(sc, data);
@@ -236,7 +237,45 @@ public class TestSparkMultiLayer extends BaseSparkTest {
         network3.setParameters(params);
         INDArray params4 = network3.params(true);
         assertEquals(params, params4);
+    }
 
+    @Test
+    public void testRunIteration() {
+
+        DataSet dataSet = new IrisDataSetIterator(5,5).next();
+        List<DataSet> list = dataSet.asList();
+        JavaRDD<DataSet> data = sc.parallelize(list);
+
+        SparkDl4jMultiLayer sparkNetCopy = new SparkDl4jMultiLayer(sc, getBasicConf());
+        MultiLayerNetwork networkCopy = sparkNetCopy.fitDataSet(data);
+
+        INDArray expectedParams = networkCopy.params();
+
+        SparkDl4jMultiLayer sparkNet = getBasicNetwork();
+        MultiLayerNetwork network = sparkNet.fitDataSet(data);
+        INDArray actualParams = network.params();
+
+        assertEquals(expectedParams.size(1), actualParams.size(1));
+    }
+
+    @Test
+    public void testUpdaters() {
+        SparkDl4jMultiLayer sparkNet = getBasicNetwork();
+        MultiLayerNetwork netCopy = sparkNet.getNetwork().clone();
+
+        netCopy.fit(data);
+        Updater expectedUpdater = netCopy.conf().getLayer().getUpdater();
+        double expectedLR = netCopy.conf().getLayer().getLearningRate();
+        double expectedMomentum = netCopy.conf().getLayer().getMomentum();
+
+        Updater actualUpdater = sparkNet.getNetwork().conf().getLayer().getUpdater();
+        sparkNet.runIteration(sparkData);
+        double actualLR = sparkNet.getNetwork().conf().getLayer().getLearningRate();
+        double actualMomentum = sparkNet.getNetwork().conf().getLayer().getMomentum();
+
+        assertEquals(expectedUpdater, actualUpdater);
+        assertEquals(expectedLR, actualLR, 0.01);
+        assertEquals(expectedMomentum, actualMomentum, 0.01);
 
     }
 
@@ -244,62 +283,21 @@ public class TestSparkMultiLayer extends BaseSparkTest {
     @Test
     public void testEvaluation(){
 
-        int nIn = 4;
-        int nOut = 3;
-
-        MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
-                .list(2)
-                .layer(0, new org.deeplearning4j.nn.conf.layers.DenseLayer.Builder()
-                        .nIn(nIn).nOut(3)
-                        .activation("tanh").build())
-                .layer(1, new org.deeplearning4j.nn.conf.layers.OutputLayer.Builder(LossFunctions.LossFunction.MCXENT)
-                        .nIn(3).nOut(nOut)
-                        .activation("softmax")
-                        .build())
-                .build();
-
-        int nRows = 200;
-
-
-
-        Random r = new Random(12345);
-        INDArray labels = Nd4j.create(nRows,nOut);
-        INDArray input = Nd4j.rand(nRows,nIn);
-        INDArray rowSums = input.sum(1);
-        input.diviColumnVector(rowSums);
-
-        for( int i=0; i<nRows; i++ ){
-            int x1 = r.nextInt(nOut);
-            labels.putScalar(new int[]{i, x1}, 1.0);
-        }
-
-        SparkDl4jMultiLayer sparkNet = new SparkDl4jMultiLayer(sc,conf);
-
+        SparkDl4jMultiLayer sparkNet = getBasicNetwork();
         MultiLayerNetwork netCopy = sparkNet.getNetwork().clone();
 
         Evaluation evalExpected = new Evaluation();
         INDArray outLocal = netCopy.output(input, Layer.TrainingMode.TEST);
-        evalExpected.eval(labels,outLocal);
+        evalExpected.eval(labels, outLocal);
 
-        List<DataSet> list = new ArrayList<>();
-        for( int i=0; i<nRows; i++ ){
-            INDArray inRow = input.getRow(i).dup();
-            INDArray outRow = labels.getRow(i).dup();
-
-            DataSet ds = new DataSet(inRow,outRow);
-            list.add(ds);
-        }
-
-        JavaRDD<DataSet> ds = sc.parallelize(list);
-
-        Evaluation evalActual = sparkNet.evaluate(ds, 10);
+        Evaluation evalActual = sparkNet.evaluate(sparkData);
 
         assertEquals(evalExpected.accuracy(), evalActual.accuracy(), 1e-3);
         assertEquals(evalExpected.f1(), evalActual.f1(), 1e-3);
         assertEquals(evalExpected.getNumRowCounter(), evalActual.getNumRowCounter(), 1e-3);
         assertEquals(evalExpected.falseNegatives(),evalActual.falseNegatives(),1e-3);
         assertEquals(evalExpected.falsePositives(), evalActual.falsePositives(), 1e-3);
-        assertEquals(evalExpected.trueNegatives(),evalActual.trueNegatives(),1e-3);
+        assertEquals(evalExpected.trueNegatives(), evalActual.trueNegatives(), 1e-3);
         assertEquals(evalExpected.truePositives(),evalActual.truePositives(),1e-3);
         assertEquals(evalExpected.precision(), evalActual.precision(), 1e-3);
         assertEquals(evalExpected.recall(), evalActual.recall(), 1e-3);
@@ -311,13 +309,10 @@ public class TestSparkMultiLayer extends BaseSparkTest {
         //Idea: Test spark training where some executors don't get any data
         //in this case: by having fewer examples (2 DataSets) than executors (local[*])
 
-        int nIn = 4;
-        int nOut = 3;
-
         MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
                 .updater(Updater.RMSPROP)
                 .optimizationAlgo(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT).iterations(1)
-                .list(2)
+                .list()
                 .layer(0, new org.deeplearning4j.nn.conf.layers.DenseLayer.Builder()
                         .nIn(nIn).nOut(3)
                         .activation("tanh").build())
@@ -337,7 +332,89 @@ public class TestSparkMultiLayer extends BaseSparkTest {
 
         sparkNet.fitDataSet(rddData);
 
+    }
 
+    @Test
+    public void testDistributedScoring(){
 
+        MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
+                .regularization(true).l1(0.1).l2(0.1)
+                .seed(123)
+                .updater(Updater.NESTEROVS)
+                .learningRate(0.1)
+                .momentum(0.9)
+                .list()
+                .layer(0, new org.deeplearning4j.nn.conf.layers.DenseLayer.Builder()
+                        .nIn(nIn).nOut(3)
+                        .activation("tanh").build())
+                .layer(1, new org.deeplearning4j.nn.conf.layers.OutputLayer.Builder(LossFunctions.LossFunction.MCXENT)
+                        .nIn(3).nOut(nOut)
+                        .activation("softmax")
+                        .build())
+                .backprop(true)
+                .pretrain(false)
+                .build();
+
+        SparkDl4jMultiLayer sparkNet = new SparkDl4jMultiLayer(sc,conf);
+        MultiLayerNetwork netCopy = sparkNet.getNetwork().clone();
+
+        int nRows = 100;
+
+        INDArray features = Nd4j.rand(nRows,nIn);
+        INDArray labels = Nd4j.zeros(nRows, nOut);
+        Random r = new Random(12345);
+        for( int i=0; i<nRows; i++ ){
+            labels.putScalar(new int[]{i,r.nextInt(nOut)},1.0);
+        }
+
+        INDArray localScoresWithReg = netCopy.scoreExamples(new DataSet(features,labels),true);
+        INDArray localScoresNoReg = netCopy.scoreExamples(new DataSet(features,labels),false);
+
+        List<Tuple2<String,DataSet>> dataWithKeys = new ArrayList<>();
+        for( int i=0; i<nRows; i++ ){
+            DataSet ds = new DataSet(features.getRow(i).dup(),labels.getRow(i).dup());
+            dataWithKeys.add(new Tuple2<>(String.valueOf(i),ds));
+        }
+        JavaPairRDD<String,DataSet> dataWithKeysRdd = sc.parallelizePairs(dataWithKeys);
+
+        JavaPairRDD<String,Double> sparkScoresWithReg = sparkNet.scoreExamples(dataWithKeysRdd, true, 4);
+        JavaPairRDD<String,Double> sparkScoresNoReg = sparkNet.scoreExamples(dataWithKeysRdd,false,4);
+
+        Map<String,Double> sparkScoresWithRegMap = sparkScoresWithReg.collectAsMap();
+        Map<String,Double> sparkScoresNoRegMap = sparkScoresNoReg.collectAsMap();
+
+        for( int i=0; i<nRows; i++ ){
+            double scoreRegExp = localScoresWithReg.getDouble(i);
+            double scoreRegAct = sparkScoresWithRegMap.get(String.valueOf(i));
+            assertEquals(scoreRegExp,scoreRegAct,1e-5);
+
+            double scoreNoRegExp = localScoresNoReg.getDouble(i);
+            double scoreNoRegAct = sparkScoresNoRegMap.get(String.valueOf(i));
+            assertEquals(scoreNoRegExp, scoreNoRegAct, 1e-5);
+
+//            System.out.println(scoreRegExp + "\t" + scoreRegAct + "\t" + scoreNoRegExp + "\t" + scoreNoRegAct);
+        }
+
+        List<DataSet> dataNoKeys = new ArrayList<>();
+        for( int i=0; i<nRows; i++ ){
+            dataNoKeys.add(new DataSet(features.getRow(i).dup(),labels.getRow(i).dup()));
+        }
+        JavaRDD<DataSet> dataNoKeysRdd = sc.parallelize(dataNoKeys);
+
+        List<Double> scoresWithReg = sparkNet.scoreExamples(dataNoKeysRdd,true,4).collect();
+        List<Double> scoresNoReg = sparkNet.scoreExamples(dataNoKeysRdd,false,4).collect();
+        Collections.sort(scoresWithReg);
+        Collections.sort(scoresNoReg);
+        double[] localScoresWithRegDouble = localScoresWithReg.data().asDouble();
+        double[] localScoresNoRegDouble = localScoresNoReg.data().asDouble();
+        Arrays.sort(localScoresWithRegDouble);
+        Arrays.sort(localScoresNoRegDouble);
+
+        for( int i=0; i<localScoresWithRegDouble.length; i++ ){
+            assertEquals(localScoresWithRegDouble[i],scoresWithReg.get(i),1e-5);
+            assertEquals(localScoresNoRegDouble[i],scoresNoReg.get(i),1e-5);
+
+            //System.out.println(localScoresWithRegDouble[i] + "\t" + scoresWithReg.get(i) + "\t" + localScoresNoRegDouble[i] + "\t" + scoresNoReg.get(i));
+        }
     }
 }
