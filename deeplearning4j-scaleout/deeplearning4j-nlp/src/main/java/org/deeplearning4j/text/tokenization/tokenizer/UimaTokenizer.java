@@ -24,12 +24,14 @@ import java.util.List;
 
 import org.apache.uima.analysis_engine.AnalysisEngine;
 import org.apache.uima.cas.CAS;
+import org.apache.uima.jcas.tcas.Annotation;
 import org.apache.uima.fit.util.JCasUtil;
 import org.apache.uima.util.CasPool;
 import org.cleartk.token.type.Token;
 import org.deeplearning4j.text.uima.UimaResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.InputStream;
 
 /**
  * Tokenizer based on the passed in analysis engine
@@ -43,8 +45,12 @@ public class UimaTokenizer implements Tokenizer {
     private static final Logger log = LoggerFactory.getLogger(UimaTokenizer.class);
     private boolean checkForLabel;
     private TokenPreProcess preProcess;
+    private Class tokenClass;
 
 
+    /** 
+     * Tokenizes using org.cleartk.token.type.Token
+     */
     public UimaTokenizer(String tokens,UimaResource resource,boolean checkForLabel) {
     
         this.checkForLabel = checkForLabel;
@@ -55,7 +61,6 @@ public class UimaTokenizer implements Tokenizer {
             Collection<Token> tokenList = JCasUtil.select(cas.getJCas(), Token.class);
 
             for(Token t : tokenList) {
-
                 if(!checkForLabel || valid(t.getCoveredText()))
                     if(t.getLemma() != null)
                         this.tokens.add(t.getLemma());
@@ -64,17 +69,59 @@ public class UimaTokenizer implements Tokenizer {
                     else
                         this.tokens.add(t.getCoveredText());
             }
-
-
            resource.release(cas);
-
-
         } catch (Exception e) {
         	e.printStackTrace();
             throw new RuntimeException(e);
         }
-
     }
+
+
+    /** Tokenizes on the basis of UIMA annotations tokens
+    */
+    public UimaTokenizer(String tokentext,UimaResource resource,String token_classname) {
+    
+        this.tokens = new ArrayList<>();
+	log.info("Called UIMA String Tokenzier constructor to get tokens of type "+token_classname);
+        try {
+            tokenClass = Class.forName(token_classname);
+            CAS cas = resource.process(tokentext);
+            for(Object some_token : JCasUtil.select(cas.getJCas(), tokenClass)) {
+                    Annotation atoken = (Annotation) some_token;
+                    this.tokens.add(atoken.getCoveredText());
+            }
+            if(this.tokens.size()==0) log.warn("Failed to get any "+token_classname+" tokens.");
+           resource.release(cas);
+        } catch (Exception e) {
+        	e.printStackTrace();
+            throw new RuntimeException(e);
+        }
+    }
+
+
+    /** Tokenizes on the basis of text covered by org.apache.uima.jcas.tcas.Annotation
+    * Should handle org.apache.ctakes.typesystem.type.syntax.BaseToken
+    */
+    public UimaTokenizer(InputStream tokenstream,UimaResource resource,String token_classname) {
+    
+        this.checkForLabel = checkForLabel;
+        this.tokens = new ArrayList<>();
+	log.info("Called correct uimatokenizer constructor to get "+token_classname);
+        try {
+            tokenClass = Class.forName(token_classname);
+            CAS cas = resource.process(tokenstream);
+            for(Object some_token : JCasUtil.select(cas.getJCas(), tokenClass)) {
+                    Annotation atoken = (Annotation) some_token;
+                    this.tokens.add(atoken.getCoveredText());
+            }
+            if(this.tokens.size()==0) log.warn("Failed to get any "+token_classname+" tokens.");
+           resource.release(cas);
+        } catch (Exception e) {
+        	e.printStackTrace();
+            throw new RuntimeException(e);
+        }
+    }
+
 
     private boolean valid(String check) {
         return !(check.matches("<[A-Z]+>") || check.matches("</[A-Z]+>"));
@@ -98,6 +145,7 @@ public class UimaTokenizer implements Tokenizer {
         index++;
         if(preProcess != null)
             ret = preProcess.preProcess(ret);
+        log.info("UimaTokenizer:nextToken() of:"+ret);
         return ret;
     }
 

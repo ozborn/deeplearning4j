@@ -36,15 +36,15 @@ public class DefaultStreamTokenizer implements Tokenizer {
 
     private StreamTokenizer streamTokenizer;
     private TokenPreProcess tokenPreProcess;
+    private static final Logger log  = LoggerFactory.getLogger(DefaultStreamTokenizer.class);
+
     private List<String> tokens = new ArrayList<>();
     private AtomicInteger position = new AtomicInteger(0);
-
-    protected static final Logger log = LoggerFactory.getLogger(DefaultStreamTokenizer.class);
 
     public DefaultStreamTokenizer(InputStream is) {
         Reader r = new BufferedReader(new InputStreamReader(is));
         streamTokenizer = new StreamTokenizer(r);
-
+	log.warn("Wrong Tokenizer used!!");
     }
 
     /**
