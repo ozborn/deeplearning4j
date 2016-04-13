@@ -138,7 +138,8 @@ public class WordVectorSerializer {
      * @throws IOException
      * @throws NumberFormatException
      */
-    private static Word2Vec readTextModel(File modelFile)
+    //private static Word2Vec readTextModel(File modelFile)
+    public static Word2Vec readTextModel(File modelFile) //Made public...(ozborn)
             throws IOException, NumberFormatException {
         InMemoryLookupTable lookupTable;
         VocabCache cache;
