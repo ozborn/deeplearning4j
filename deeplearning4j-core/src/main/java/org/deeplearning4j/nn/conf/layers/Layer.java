@@ -43,7 +43,6 @@ import org.deeplearning4j.nn.weights.WeightInit;
 @JsonSubTypes(value={
         @JsonSubTypes.Type(value = AutoEncoder.class, name = "autoEncoder"),
         @JsonSubTypes.Type(value = ConvolutionLayer.class, name = "convolution"),
-        @JsonSubTypes.Type(value = ImageLSTM.class, name = "imageLSTM"),
         @JsonSubTypes.Type(value = GravesLSTM.class, name = "gravesLSTM"),
         @JsonSubTypes.Type(value = GravesBidirectionalLSTM.class, name = "gravesBidirectionalLSTM"),
         @JsonSubTypes.Type(value = GRU.class, name = "gru"),
@@ -51,7 +50,6 @@ import org.deeplearning4j.nn.weights.WeightInit;
         @JsonSubTypes.Type(value = RnnOutputLayer.class, name = "rnnoutput"),
         @JsonSubTypes.Type(value = RBM.class, name = "RBM"),
         @JsonSubTypes.Type(value = DenseLayer.class, name = "dense"),
-        @JsonSubTypes.Type(value = RecursiveAutoEncoder.class, name = "recursiveAutoEncoder"),
         @JsonSubTypes.Type(value = SubsamplingLayer.class, name = "subsampling"),
         @JsonSubTypes.Type(value = BatchNormalization.class, name = "batchNormalization"),
         @JsonSubTypes.Type(value = LocalResponseNormalization.class, name = "localResponseNormalization"),
@@ -82,8 +80,8 @@ public abstract class Layer implements Serializable, Cloneable {
     //adadelta - weight for how much to consider previous history
     protected double rho;
     protected double rmsDecay;
-    protected double adamMeanDecay = 0.9;
-    protected double adamVarDecay = 0.999;
+    protected double adamMeanDecay;
+    protected double adamVarDecay;
     protected GradientNormalization gradientNormalization = GradientNormalization.None; //Clipping, rescale based on l2 norm, etc
     protected double gradientNormalizationThreshold = 1.0;   //Threshold for l2 and element-wise gradient clipping
 

@@ -110,9 +110,7 @@ public abstract class BaseEarlyStoppingTrainer<T extends Model> implements IEarl
             while (iterator.hasNext()) {
                 try {
                     if (train != null) {
-                        DataSet ds = (DataSet) iterator.next();
-                        if (ds != null)
-                            fit(ds);
+                        fit((DataSet) iterator.next());
                     } else
                         fit(trainMulti.next());
                 } catch (Exception e) {
@@ -251,9 +249,9 @@ public abstract class BaseEarlyStoppingTrainer<T extends Model> implements IEarl
 
                     return result;
                 }
-
-                epochCount++;
             }
+            epochCount++;
+
         }
     }
 
@@ -262,11 +260,9 @@ public abstract class BaseEarlyStoppingTrainer<T extends Model> implements IEarl
         this.listener = listener;
     }
 
-
     protected void reset() {
         if (train != null) train.reset();
         if (trainMulti != null) trainMulti.reset();
-        ;
     }
 
 

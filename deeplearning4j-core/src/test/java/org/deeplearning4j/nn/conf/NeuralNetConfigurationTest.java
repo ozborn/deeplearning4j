@@ -129,10 +129,32 @@ public class NeuralNetConfigurationTest {
                 .optimizationAlgo(OptimizationAlgorithm.CONJUGATE_GRADIENT)
                 .layer(layer)
                 .build();
-        Layer model = LayerFactories.getFactory(conf).create(conf);
+
+        int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+        INDArray params = Nd4j.create(1, numParams);
+        Layer model = LayerFactories.getFactory(conf).create(conf, null, 0, params);
         INDArray modelWeights = model.getParam(DefaultParamInitializer.WEIGHT_KEY);
 
-        Layer model2 = LayerFactories.getFactory(conf).create(conf);
+
+        RBM layer2 = new RBM.Builder()
+                .nIn(trainingSet.numInputs())
+                .nOut(trainingSet.numOutcomes())
+                .weightInit(WeightInit.UNIFORM)
+                .visibleUnit(RBM.VisibleUnit.GAUSSIAN)
+                .hiddenUnit(RBM.HiddenUnit.RECTIFIED)
+                .activation("tanh")
+                .lossFunction(LossFunctions.LossFunction.RMSE_XENT)
+                .build();
+        NeuralNetConfiguration conf2 = new NeuralNetConfiguration.Builder()
+                .seed(123)
+                .iterations(3)
+                .optimizationAlgo(OptimizationAlgorithm.CONJUGATE_GRADIENT)
+                .layer(layer2)
+                .build();
+
+        int numParams2 = LayerFactories.getFactory(conf2).initializer().numParams(conf,true);
+        INDArray params2 = Nd4j.create(1, numParams);
+        Layer model2 = LayerFactories.getFactory(conf2).create(conf2, null, 0, params2);
         INDArray modelWeights2 = model2.getParam(DefaultParamInitializer.WEIGHT_KEY);
 
         assertEquals(modelWeights, modelWeights2);
@@ -233,8 +255,9 @@ public class NeuralNetConfigurationTest {
 
     private static Layer getRBMLayer(int nIn, int nOut, WeightInit weightInit){
         NeuralNetConfiguration conf = getRBMConfig(nIn, nOut, weightInit);
-        return LayerFactories.getFactory(conf).create(conf);
-
+        int numParams = LayerFactories.getFactory(conf).initializer().numParams(conf,true);
+        INDArray params = Nd4j.create(1, numParams);
+        return LayerFactories.getFactory(conf).create(conf, null, 0, params);
     }
 
 
@@ -250,6 +273,7 @@ public class NeuralNetConfigurationTest {
         INDArray gradientW = Nd4j.ones(nIns[0], nOuts[0]);
 
         MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
+                .learningRate(0.3)
                 .list()
                 .layer(0, new DenseLayer.Builder().nIn(nIns[0]).nOut(nOuts[0]).updater(org.deeplearning4j.nn.conf.Updater.SGD).learningRate(lr).biasLearningRate(biasLr).build())
                 .layer(1, new BatchNormalization.Builder().nIn(nIns[1]).nOut(nOuts[1]).learningRate(0.7).build())
@@ -265,7 +289,8 @@ public class NeuralNetConfigurationTest {
         assertEquals(lr, net.getLayer(0).conf().getLearningRateByParam("W"), 1e-4);
         assertEquals(biasLr, net.getLayer(0).conf().getLearningRateByParam("b"), 1e-4);
         assertEquals(0.7, net.getLayer(1).conf().getLearningRateByParam("gamma"), 1e-4);
-        assertEquals(0.1, net.getLayer(1).conf().getLearningRateByParam("b"), 1e-4);
+        assertEquals(0.3, net.getLayer(2).conf().getLearningRateByParam("W"), 1e-4);        //From global LR
+        assertEquals(0.3, net.getLayer(2).conf().getLearningRateByParam("b"), 1e-4);        //From global LR
     }
 
     @Test
@@ -329,7 +354,6 @@ public class NeuralNetConfigurationTest {
         assertEquals(l1, net.getLayer(0).conf().getL1ByParam("W"), 1e-4);
         assertEquals(0.0, net.getLayer(0).conf().getL1ByParam("b"), 1e-4);
         assertEquals(0.5, net.getLayer(1).conf().getL2ByParam("gamma"), 1e-4);
-        assertEquals(0.0, net.getLayer(1).conf().getL2ByParam("b"), 1e-4);
         assertEquals(l2, net.getLayer(2).conf().getL2ByParam("W"), 1e-4);
         assertEquals(0.0, net.getLayer(2).conf().getL2ByParam("b"), 1e-4);
     }

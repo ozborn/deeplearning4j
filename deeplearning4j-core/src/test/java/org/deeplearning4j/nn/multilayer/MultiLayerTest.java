@@ -21,6 +21,7 @@ package org.deeplearning4j.nn.multilayer;
 import com.google.common.collect.Lists;
 import org.deeplearning4j.berkeley.Pair;
 import org.deeplearning4j.datasets.iterator.DataSetIterator;
+import org.deeplearning4j.datasets.iterator.impl.CifarDataSetIterator;
 import org.deeplearning4j.datasets.iterator.impl.IrisDataSetIterator;
 import org.deeplearning4j.datasets.iterator.impl.LFWDataSetIterator;
 import org.deeplearning4j.datasets.iterator.impl.MnistDataSetIterator;
@@ -107,29 +108,6 @@ public class MultiLayerTest {
     }
 
     @Test
-    public void testReDistribute() {
-        MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
-                .list()
-                .layer(0, new RBM.Builder(RBM.HiddenUnit.RECTIFIED, RBM.VisibleUnit.GAUSSIAN)
-                        .nIn(4).nOut(3)
-                        .activation("tanh")
-                        .build())
-                .layer(1, new RBM.Builder(RBM.HiddenUnit.GAUSSIAN, RBM.VisibleUnit.GAUSSIAN).nIn(3).nOut(2)
-                        .build())
-                .build();
-
-
-        MultiLayerNetwork network = new MultiLayerNetwork(conf);
-        network.init();
-        INDArray params = network.params(true);
-        network.reDistributeParams(true);
-        INDArray params2 = network.params(true);
-        assertEquals(params,params2);
-    }
-
-
-
-    @Test
     public void testBatchNorm() {
         Nd4j.getRandom().setSeed(123);
         MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
@@ -139,14 +117,12 @@ public class MultiLayerTest {
                 .list()
                 .layer(0, new DenseLayer.Builder().nIn(4).nOut(3).weightInit(WeightInit.XAVIER).activation("tanh").build())
                 .layer(1, new DenseLayer.Builder().nIn(3).nOut(2).weightInit(WeightInit.XAVIER).activation("tanh").build())
-                .layer(2, new BatchNormalization.Builder().build())
+                .layer(2, new BatchNormalization.Builder().nOut(2).build())
                 .layer(3, new org.deeplearning4j.nn.conf.layers.OutputLayer.Builder(LossFunctions.LossFunction.MCXENT)
                         .weightInit(WeightInit.XAVIER)
                         .activation("softmax")
                         .nIn(2).nOut(3).build())
                 .backprop(true).pretrain(false)
-                .inputPreProcessor(2,new FeedForwardToCnnPreProcessor(1,2,1))
-                .inputPreProcessor(3,new CnnToFeedForwardPreProcessor(1,2,1))
                 .build();
 
 
@@ -537,6 +513,8 @@ public class MultiLayerTest {
         net.init();
 
         Layer layer = net.getLayer(0);
+        int nParamsBackprop = layer.numParams(true);
+        int nParamsBoth = layer.numParams(false);
         Layer transposed = layer.transpose();
 
         assertArrayEquals(new int[]{4,3},layer.getParam(DefaultParamInitializer.WEIGHT_KEY).shape());
@@ -650,7 +628,7 @@ public class MultiLayerTest {
                 .learningRate(1.0)
                 .seed(12345L)
                 .list()
-                .layer(0, new ConvolutionLayer.Builder(2,2).nOut(3).build())
+                .layer(0, new ConvolutionLayer.Builder(2,2).nOut(1).build())
                 .layer(1, new OutputLayer.Builder(LossFunctions.LossFunction.MCXENT).activation("softmax").nOut(2).build())
                 .cnnInputSize(3,3,2)
                 .pretrain(false).backprop(true).build();
@@ -673,6 +651,35 @@ public class MultiLayerTest {
         }
 
         double score = net.score(new DataSet(input,labels));
+    }
+
+    @Test
+    public void testPredict() throws Exception{
+
+        Nd4j.getRandom().setSeed(12345);
+        MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
+                .regularization(false)
+                .learningRate(1.0)
+                .weightInit(WeightInit.XAVIER)
+                .seed(12345L)
+                .list()
+                .layer(0, new DenseLayer.Builder().nIn(400).nOut(50).activation("relu").build())
+                .layer(1, new OutputLayer.Builder(LossFunctions.LossFunction.MCXENT).activation("softmax").nIn(50).nOut(10).build())
+                .pretrain(false).backprop(true)
+                .build();
+
+        MultiLayerNetwork net = new MultiLayerNetwork(conf);
+        net.init();
+
+        DataSetIterator ds = new CifarDataSetIterator(10,10, new int[]{20,20,1});
+        net.fit(ds);
+
+        DataSetIterator testDs = new CifarDataSetIterator(1,1, new int[]{20,20,1});
+        DataSet testData = testDs.next();
+        String actualLables = testData.getLabelName(0);
+        List<String> prediction = net.predict(testData);
+        assertTrue(actualLables != null);
+        assertTrue(prediction.get(0) != null);
     }
 
     @Test

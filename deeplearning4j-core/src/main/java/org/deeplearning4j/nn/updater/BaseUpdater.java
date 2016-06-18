@@ -34,18 +34,18 @@ public abstract class BaseUpdater implements Updater {
     @Override
     public void update(Layer layer, Gradient gradient, int iteration, int miniBatchSize) {
         String paramName;
-        INDArray paramVal, gradient2;
+        INDArray gradientOrig, gradient2;
         GradientUpdater updater;
 
         preApply(layer, gradient, iteration);
         for (Map.Entry<String, INDArray> gradientPair : gradient.gradientForVariable().entrySet()) {
             paramName = gradientPair.getKey();
-            paramVal = gradientPair.getValue();
+            gradientOrig = gradientPair.getValue();
             LearningRatePolicy decay = layer.conf().getLearningRatePolicy();
             if (decay != LearningRatePolicy.None || layer.conf().getLayer().getUpdater() == org.deeplearning4j.nn.conf.Updater.NESTEROVS)
                 applyLrDecayPolicy(decay, layer, iteration, paramName);
-            updater = init(paramName, paramVal, layer);
-            gradient2 = updater.getGradient(paramVal, iteration);
+            updater = init(paramName, gradientOrig, layer);
+            gradient2 = updater.getGradient(gradientOrig, iteration);
             postApply(layer, gradient2, paramName, miniBatchSize);
             gradient.setGradientFor(paramName, gradient2);
         }
@@ -100,7 +100,7 @@ public abstract class BaseUpdater implements Updater {
                 conf.setLearningRateByParam(variable, lr * Math.pow(decayRate, Math.floor(iteration/conf.getLrPolicySteps())));
                 break;
             case Poly:
-                conf.setLearningRateByParam(variable, lr * Math.pow((1 - (iteration * 1.0)/conf.getNumIterations()), conf.getLrPolicyPower()));
+                conf.setLearningRateByParam(variable, lr * Math.pow((1 - ((double)iteration)/conf.getNumIterations()), conf.getLrPolicyPower()));
                 break;
             case Sigmoid:
                 conf.setLearningRateByParam(variable, lr / (1 + Math.exp(-decayRate * (iteration - conf.getLrPolicySteps()))));

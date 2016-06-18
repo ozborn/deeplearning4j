@@ -52,15 +52,14 @@ public class ConvolutionLayerSetupTest {
         final int numColumns = 75;
         int nChannels = 3;
         int outputNum = 6;
-        int batchSize = 500;
-        int iterations = 10;
+        int iterations = 3;
         int seed = 123;
 
         //setup the network
         MultiLayerConfiguration.Builder builder = new NeuralNetConfiguration.Builder()
                 .seed(seed)
                 .iterations(iterations).regularization(true)
-                .l1(1e-1).l2(2e-4).useDropConnect(true)
+                .l1(1e-1).l2(2e-4).useDropConnect(true).dropOut(0.5)
                 .miniBatch(true)
                 .optimizationAlgo(OptimizationAlgorithm.CONJUGATE_GRADIENT)
                 .list()
@@ -69,7 +68,6 @@ public class ConvolutionLayerSetupTest {
                         .weightInit(WeightInit.XAVIER)
                         .activation("relu")
                         .build())
-
                 .layer(1, new SubsamplingLayer
                         .Builder(SubsamplingLayer.PoolingType.MAX, new int[]{2, 2})
                         .build())
@@ -83,7 +81,6 @@ public class ConvolutionLayerSetupTest {
                         .build())
                 .layer(4, new DenseLayer.Builder().nOut(100).activation("relu")
                         .build())
-
                 .layer(5, new OutputLayer.Builder(LossFunctions.LossFunction.NEGATIVELOGLIKELIHOOD)
                         .nOut(outputNum)
                         .weightInit(WeightInit.XAVIER)
@@ -92,7 +89,7 @@ public class ConvolutionLayerSetupTest {
                 .backprop(true).pretrain(false);
 
         new ConvolutionLayerSetup(builder,numRows,numColumns,nChannels);
-        DataSet d = new DataSet(Nd4j.rand(10,3,75,75).reshape(10,3 * 75 * 75), FeatureUtil.toOutcomeMatrix(new int[]{1,1,1,1,1,1,1,1,1,1},6));
+        DataSet d = new DataSet(Nd4j.rand(12345,10,3,75,75).reshape(10,3 * 75 * 75), FeatureUtil.toOutcomeMatrix(new int[]{1,1,1,1,1,1,1,1,1,1},6));
         MultiLayerNetwork network = new MultiLayerNetwork(builder.build());
         network.init();
         network.fit(d);
@@ -132,7 +129,7 @@ public class ConvolutionLayerSetupTest {
 
         RecordReader reader = new ImageRecordReader(28,28,3,true,labels);
         reader.initialize(new FileSplit(new File(rootDir)));
-        DataSetIterator recordReader = new RecordReaderDataSetIterator(reader,28 * 28 * 3,labels.size());
+        DataSetIterator recordReader = new RecordReaderDataSetIterator(reader,1,labels.size());
 
         labels.remove("lfwtest");
         NeuralNetConfiguration.ListBuilder builder = (NeuralNetConfiguration.ListBuilder) incompleteLFW();
@@ -154,7 +151,7 @@ public class ConvolutionLayerSetupTest {
 
         RecordReader reader = new ImageRecordReader(28,28,3,true,labels);
         reader.initialize(new FileSplit(new File(rootDir)));
-        DataSetIterator recordReader = new RecordReaderDataSetIterator(reader,28 * 28 * 3,labels.size());
+        DataSetIterator recordReader = new RecordReaderDataSetIterator(reader,1,labels.size());
         labels.remove("lfwtest");
         NeuralNetConfiguration.ListBuilder builder = (NeuralNetConfiguration.ListBuilder) incompleteLRN();
         new ConvolutionLayerSetup(builder,28,28,3);

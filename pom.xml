@@ -20,7 +20,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.deeplearning4j</groupId>
     <artifactId>deeplearning4j-parent</artifactId>
-    <version>0.4-rc3.9-SNAPSHOT</version>
+    <version>0.4-rc3.10</version>
     <packaging>pom</packaging>
     <name>DeepLearning4j</name>
 
@@ -51,8 +51,8 @@
 
 
     <properties>
-        <nd4j.version>0.4-rc3.9-SNAPSHOT</nd4j.version>
-        <canova.version>0.0.0.15-SNAPSHOT</canova.version>
+        <nd4j.version>0.4-rc3.10</nd4j.version>
+        <canova.version>0.0.0.16</canova.version>
         <commonsmath.version>3.4.1</commonsmath.version>
         <commonslang.version>3.3.1</commonslang.version>
         <commonsio.version>2.4</commonsio.version>
@@ -70,6 +70,8 @@
         <json.version>20131018</json.version>
         <google.protobuf.version>2.6.1</google.protobuf.version>
         <failIfNoTests>false</failIfNoTests>
+        <scala.binary.version>2.11</scala.binary.version>
+        <scala.version>2.11.7</scala.version>
     </properties>
 
 
@@ -163,16 +165,16 @@
         <connection>scm:git:git@github.com:deeplearning4j/deeplearning4j.git</connection>
         <developerConnection>scm:git:git@github.com:deeplearning4j/deeplearning4j.git</developerConnection>
         <url>git@github.com:deeplearning4j/deeplearning4j.git</url>
-        <tag>HEAD</tag>
+        <tag>deeplearning4j-parent-0.4-rc3.10</tag>
     </scm>
 
     <modules>
         <module>deeplearning4j-core</module>
         <module>deeplearning4j-scaleout</module>
         <module>deeplearning4j-cli</module>
-        <module>deeplearning4j-ui</module>
         <module>dl4j-test-resources</module>
         <module>dl4j-caffe</module>
+        <module>deeplearning4j-ui-parent</module>
     </modules>
 
     <licenses>
@@ -185,13 +187,14 @@
 
     <developers>
         <developer>
-            <id>smarthi</id>
-            <name>Suneel Marthi</name>
-        </developer>
-        <developer>
             <id>agibsonccc</id>
             <name>Adam Gibson</name>
             <email>adam@skymind.io</email>
+        </developer>
+        <developer>
+            <id>chrisvnicholson</id>
+            <name>Chris Nicholson</name>
+            <email>chris@skymind.io</email>
         </developer>
         <developer>
             <id>jpatanooga</id>
@@ -202,15 +205,51 @@
             <name>Alex Black</name>
         </developer>
         <developer>
+            <id>nyghtowl</id>
+            <name>Melanie Warrick</name>
+        </developer>
+        <developer>
+            <id>raver119</id>
+            <name>raver119</name>
+        </developer>
+        <developer>
+            <id>saudet</id>
+            <name>Samuel Audet</name>
+        </developer>
+        <developer>
+            <id>eraly</id>
+            <name>Susan Eraly</name>
+        </developer>
+        <!--current & previous core contributers and company developers-->
+        <developer>
+            <id>smarthi</id>
+            <name>Suneel Marthi</name>
+        </developer>
+        <developer>
+            <id>taisukeoe</id>
+            <name>Taisuke Oe</name>
+        </developer>
+        <developer>
+            <id>treo</id>
+            <name>Paul Dubs</name>
+        </developer>
+        <developer>
             <id>EronWright</id>
             <name>Eron Wright</name>
         </developer>
         <developer>
-            <id>nyghtowl</id>
-            <name>Melanie Warrick</name>
+            <id>jyt109</id>
+            <name>Jeffrey Tang</name>
+        </developer>
+        <developer>
+            <id>sonaliii</id>
+            <name>Sonali Dayal</name>
+        </developer>
+        <developer>
+            <id>emmjaykay</id>
+            <name>emmjaykay</name>
         </developer>
     </developers>
-
 
     <build>
         <extensions>
@@ -226,6 +265,32 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-source-plugin</artifactId>
                 <version>2.4</version>
+            </plugin>
+            <plugin>
+                <artifactId>maven-deploy-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.sonatype.plugins</groupId>
+                <artifactId>nexus-staging-maven-plugin</artifactId>
+                <version>1.6.6</version>
+                <executions>
+                    <execution>
+                        <id>default-deploy</id>
+                        <phase>deploy</phase>
+                        <goals>
+                            <goal>deploy</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <extensions>true</extensions>
+                <configuration>
+                    <serverId>nexus-releases</serverId>
+                    <nexusUrl>https://oss.sonatype.org/</nexusUrl>
+                    <skipStagingRepositoryClose>true</skipStagingRepositoryClose>
+                </configuration>
             </plugin>
         </plugins>
 
@@ -276,7 +341,10 @@
                     <version>2.5</version>
                     <configuration>
                         <mavenExecutorId>forked-path</mavenExecutorId>
-                        <arguments> -Psonatype-oss-release -DskipTests</arguments>
+                        <!-- To deploy to an open staging repository: -Darguments=-DstagingRepositoryId=orgdeeplearning4j-xxxx -->
+                        <arguments> -Psonatype-oss-release -DskipTests ${arguments}</arguments>
+                        <localCheckout>true</localCheckout>
+                        <pushChanges>false</pushChanges>
                     </configuration>
                 </plugin>
                 <plugin>

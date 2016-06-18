@@ -53,6 +53,11 @@ public class MergeVertex extends BaseGraphVertex {
     }
 
     @Override
+    public String toString() {
+        return "MergeVertex(id=" + this.getVertexIndex() + ",name=\"" + this.getVertexName() + "\")";
+    }
+
+    @Override
     public boolean hasLayer() {
         return false;
     }
@@ -191,5 +196,10 @@ public class MergeVertex extends BaseGraphVertex {
         }
 
         return new Pair<>(null,out);
+    }
+
+    @Override
+    public void setBackpropGradientsViewArray(INDArray backpropGradientsViewArray) {
+        if(backpropGradientsViewArray != null) throw new RuntimeException("Vertex does not have gradients; gradients view array cannot be set here");
     }
 }
