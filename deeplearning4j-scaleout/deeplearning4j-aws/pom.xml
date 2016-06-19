@@ -21,7 +21,7 @@
 	<parent>
 		<groupId>org.deeplearning4j</groupId>
 		<artifactId>deeplearning4j-scaleout</artifactId>
-		<version>0.4-rc3.9-SNAPSHOT</version>
+		<version>0.4-rc3.10</version>
 	</parent>
 	<artifactId>deeplearning4j-aws</artifactId>
 	<name>DeepLearning4j-AWS</name>
@@ -37,9 +37,9 @@
 			<version>${project.version}</version>
 		</dependency>
 		<dependency>
-			<groupId>org.deeplearning4j</groupId>
-			<artifactId>deeplearning4j-scaleout-akka</artifactId>
-			<version>${project.version}</version>
+			<groupId>args4j</groupId>
+			<artifactId>args4j</artifactId>
+			<version>2.32</version>
 		</dependency>
 		<dependency>
 			<groupId>com.jcraft</groupId>

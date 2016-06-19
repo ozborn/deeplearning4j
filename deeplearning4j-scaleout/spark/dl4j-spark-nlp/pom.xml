@@ -20,11 +20,11 @@
     <parent>
         <artifactId>spark</artifactId>
         <groupId>org.deeplearning4j</groupId>
-        <version>0.4-rc3.9-SNAPSHOT</version>
+        <version>0.4-rc3.10</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>dl4j-spark-nlp</artifactId>
+    <artifactId>dl4j-spark-nlp_${scala.binary.version}</artifactId>
     <packaging>jar</packaging>
 
     <name>dl4j-spark-nlp</name>
@@ -67,7 +67,7 @@
         </dependency>
         <dependency>
             <groupId>org.deeplearning4j</groupId>
-            <artifactId>dl4j-spark</artifactId>
+            <artifactId>dl4j-spark_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

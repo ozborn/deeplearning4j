@@ -29,7 +29,9 @@ import org.deeplearning4j.nn.conf.layers.*;
 import org.deeplearning4j.nn.conf.preprocessor.FeedForwardToCnnPreProcessor;
 import org.deeplearning4j.nn.conf.preprocessor.RnnToCnnPreProcessor;
 import org.deeplearning4j.nn.graph.ComputationGraph;
+import org.deeplearning4j.nn.layers.convolution.KernelValidationUtil;
 import org.deeplearning4j.nn.layers.factory.LayerFactories;
+import org.nd4j.linalg.api.ndarray.INDArray;
 
 import java.util.Arrays;
 
@@ -65,10 +67,15 @@ public class LayerVertex extends GraphVertex {
     }
 
     @Override
-    public org.deeplearning4j.nn.graph.vertex.GraphVertex instantiate(ComputationGraph graph, String name, int idx) {
+    public int numParams(boolean backprop){
+        return LayerFactories.getFactory(layerConf).initializer().numParams(layerConf,backprop);
+    }
+
+    @Override
+    public org.deeplearning4j.nn.graph.vertex.GraphVertex instantiate(ComputationGraph graph, String name, int idx, INDArray paramsView) {
         return new org.deeplearning4j.nn.graph.vertex.impl.LayerVertex(
                 graph, name, idx,
-                LayerFactories.getFactory(layerConf).create(layerConf, null, idx),
+                LayerFactories.getFactory(layerConf).create(layerConf, null, idx, paramsView),
                 preProcessor);
     }
 
@@ -85,10 +92,10 @@ public class LayerVertex extends GraphVertex {
             if (preProcessor != null) {
                 if (preProcessor instanceof FeedForwardToCnnPreProcessor) {
                     FeedForwardToCnnPreProcessor ffcnn = (FeedForwardToCnnPreProcessor) preProcessor;
-                    afterPreProcessor = (InputType.InputTypeConvolutional) InputType.convolutional(ffcnn.getNumChannels(), ffcnn.getInputWidth(), ffcnn.getInputHeight());
+                    afterPreProcessor = (InputType.InputTypeConvolutional) InputType.convolutional(ffcnn.getInputHeight(), ffcnn.getInputWidth(), ffcnn.getNumChannels());
                 } else if (preProcessor instanceof RnnToCnnPreProcessor) {
                     RnnToCnnPreProcessor rnncnn = (RnnToCnnPreProcessor) preProcessor;
-                    afterPreProcessor = (InputType.InputTypeConvolutional) InputType.convolutional(rnncnn.getNumChannels(), rnncnn.getInputWidth(), rnncnn.getInputHeight());
+                    afterPreProcessor = (InputType.InputTypeConvolutional) InputType.convolutional(rnncnn.getInputHeight(), rnncnn.getInputWidth(), rnncnn.getNumChannels());
                 } else {
                     //Assume no change to type of input...
                     //TODO checks for non convolutional input...
@@ -115,28 +122,15 @@ public class LayerVertex extends GraphVertex {
             }
 
             //First: check that the kernel size/stride/padding is valid
-            int inWidth = afterPreProcessor.getWidth();
             int inHeight = afterPreProcessor.getHeight();
-            //Check filter > size + padding
-            if (kernel[0] > inWidth + padding[0] || kernel[1] > inHeight + padding[1]) {
-                throw new InvalidInputTypeException("Invalid input: activations into layer are w=" + inWidth + ", h=" + inHeight
-                        + " but kernel size is " + Arrays.toString(kernel) + " with padding " + Arrays.toString(padding));
-            }
+            int inWidth = afterPreProcessor.getWidth();
+            new KernelValidationUtil().validateShapes(inHeight, inWidth,
+                    kernel[0], kernel[1], stride[0], stride[1],padding[0], padding[1]);
 
-            //Check proposed filter/padding size actually works:
-            if ((inWidth - kernel[0] + 2 * padding[0]) % stride[0] != 0) {
-                throw new InvalidInputTypeException("Invalid input/configuration: activations into layer are inputWidth=" + inWidth + ", widthPadding=" + padding[0]
-                        + ", kernelWidth = " + kernel[0] + ", strideWidth = " + stride[0] + ". (inputWidth-kernelWidth+2*widthPadding)/strideWidth is not an integer");
-            }
-            if ((inHeight - kernel[1] + 2 * padding[1]) % stride[1] != 0) {
-                throw new InvalidInputTypeException("Invalid input/configuration: activations into layer are inputHeight=" + inHeight + ", heightPadding=" + padding[1]
-                        + ", kernelHeight = " + kernel[1] + ", strideHeight = " + stride[1] + ". (inputHeight-kernelHeight+2*heightPadding)/strideHeight is not an integer");
-            }
+            int outWidth = (inWidth - kernel[1] + 2 * padding[1]) / stride[1] + 1;
+            int outHeight = (inHeight - kernel[0] + 2 * padding[0]) / stride[0] + 1;
 
-            int outWidth = (inWidth - kernel[0] + 2 * padding[0]) / stride[0] + 1;
-            int outHeight = (inHeight - kernel[1] + 2 * padding[1]) / stride[1] + 1;
-
-            return InputType.convolutional(channelsOut,outWidth,outHeight);
+            return InputType.convolutional(outHeight,outWidth,channelsOut);
         } else if (layer instanceof BaseRecurrentLayer) {
             return InputType.recurrent(((BaseRecurrentLayer) layer).getNOut());
         } else if (layer instanceof FeedForwardLayer) {

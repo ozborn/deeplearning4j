@@ -22,6 +22,7 @@ package org.deeplearning4j.nn.conf.graph;
 import org.deeplearning4j.nn.conf.inputs.InputType;
 import org.deeplearning4j.nn.conf.inputs.InvalidInputTypeException;
 import org.deeplearning4j.nn.graph.ComputationGraph;
+import org.nd4j.linalg.api.ndarray.INDArray;
 
 /** A MergeVertex is used to combine the activations of two or more layers/GraphVertex by means of concatenation/merging.<br>
  * Exactly how this is done depends on the type of input.<br>
@@ -50,7 +51,12 @@ public class MergeVertex extends GraphVertex {
     }
 
     @Override
-    public org.deeplearning4j.nn.graph.vertex.GraphVertex instantiate(ComputationGraph graph, String name, int idx) {
+    public int numParams(boolean backprop){
+        return 0;
+    }
+
+    @Override
+    public org.deeplearning4j.nn.graph.vertex.GraphVertex instantiate(ComputationGraph graph, String name, int idx, INDArray paramsView) {
         return new org.deeplearning4j.nn.graph.vertex.impl.MergeVertex(graph,name,idx);
     }
 
@@ -62,7 +68,7 @@ public class MergeVertex extends GraphVertex {
             //FF or RNN data inputs
             int size = 0;
             boolean ff = true;
-            for( int i=1; i<vertexInputs.length; i++ ){
+            for( int i=0; i<vertexInputs.length; i++ ){
                 if(vertexInputs[i].getType() != first.getType()){
                     throw new InvalidInputTypeException("Invalid input: MergeVertex cannot merge activations of different types:"
                             + " first type = " + first.getType() + ", input type " + (i+1) + " = " + vertexInputs[i].getType());
@@ -119,7 +125,7 @@ public class MergeVertex extends GraphVertex {
                 depthSum += od;
             }
 
-            return InputType.convolutional(depthSum,fw,fh);
+            return InputType.convolutional(fh,fw,depthSum);
         }
     }
 }

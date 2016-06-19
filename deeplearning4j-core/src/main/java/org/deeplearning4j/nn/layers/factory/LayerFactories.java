@@ -44,16 +44,12 @@ public class LayerFactories {
      */
     public static LayerFactory getFactory(Layer layer) {
         Class<? extends Layer> clazz = layer.getClass();
-        if(clazz.equals(ImageLSTM.class))
-            return new ImageLSTMLayerFactory(ImageLSTM.class);
-        else if(clazz.equals(GravesLSTM.class))
+        if(clazz.equals(GravesLSTM.class))
         	return new GravesLSTMLayerFactory(GravesLSTM.class);
         else if (clazz.equals(GravesBidirectionalLSTM.class))
             return new GravesBidirectionalLSTMLayerFactory(GravesBidirectionalLSTM.class);
         else if(clazz.equals(GRU.class))
         	return new GRULayerFactory(GRU.class);
-        else if(RecursiveAutoEncoder.class.isAssignableFrom(clazz))
-            return new RecursiveAutoEncoderLayerFactory(RecursiveAutoEncoder.class);
         else if(BasePretrainNetwork.class.isAssignableFrom(clazz))
             return new PretrainLayerFactory(clazz);
         else if(ConvolutionLayer.class.isAssignableFrom(clazz))

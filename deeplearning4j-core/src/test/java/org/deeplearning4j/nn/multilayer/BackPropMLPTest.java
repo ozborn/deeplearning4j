@@ -18,6 +18,7 @@ import org.deeplearning4j.nn.params.DefaultParamInitializer;
 import org.deeplearning4j.nn.weights.WeightInit;
 import org.deeplearning4j.optimize.listeners.ScoreIterationListener;
 import org.junit.Test;
+import org.nd4j.linalg.api.iter.NdIndexIterator;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.dataset.DataSet;
 import org.nd4j.linalg.factory.Nd4j;
@@ -264,7 +265,7 @@ public class BackPropMLPTest {
             network.computeGradientAndScore();
             Gradient gradient = network.gradientAndScore().getFirst();
 
-            float eps = 1e-6f;
+            float eps = 1e-4f;
             for( int i=0; i<hiddenLayerSizes.length; i++ ){
                 String wKey = i + "_" + DefaultParamInitializer.WEIGHT_KEY;
                 String bKey = i + "_" + DefaultParamInitializer.BIAS_KEY;
@@ -291,9 +292,6 @@ public class BackPropMLPTest {
                 .learningRate(0.1).updater(Updater.SGD)
                 .optimizationAlgo(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT)
                 .regularization(false)
-                .l1(0.0)
-                .l2(0.0)
-                .momentum(0.0)
                 .seed(12345L)
                 .list();
 
@@ -321,8 +319,10 @@ public class BackPropMLPTest {
     public static float[] asFloat( INDArray arr) {
         int len = arr.length();
         float[] f = new float[len];
-        for( int i = 0; i < len; i++ )
-            f[i] = arr.getFloat(i);
+        NdIndexIterator iterator = new NdIndexIterator('c',arr.shape());
+        for( int i = 0; i < len; i++ ) {
+            f[i] = arr.getFloat(iterator.next());
+        }
         return f;
     }
 
