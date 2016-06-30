@@ -1101,9 +1101,12 @@ public class WordVectorSerializer {
 
             cache.putVocabWord(word);
 
-            float[] vector = new float[split.length - 2];
+	    //ozborn bugfix in rc3.10, already fixed in master
+            //float[] vector = new float[split.length - 2];
+            float[] vector = new float[split.length - 1];
 
             for (int i = 1; i < split.length; i++) {
+		if(split[i]==null || split[i].equals("")) System.out.println("Failed to load:"+word);
                 vector[i-1] = Float.parseFloat(split[i]);
             }
 
