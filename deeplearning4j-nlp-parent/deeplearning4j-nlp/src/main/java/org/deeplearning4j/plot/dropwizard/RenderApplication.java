@@ -18,7 +18,7 @@
 
 package org.deeplearning4j.plot.dropwizard;
 
-import com.google.common.collect.ImmutableMap;
+import java.util.HashMap;
 import io.dropwizard.Application;
 import io.dropwizard.assets.AssetsBundle;
 import io.dropwizard.setup.Bootstrap;
@@ -31,6 +31,7 @@ import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.Map;
 
 /**
  *
@@ -43,9 +44,9 @@ public class RenderApplication extends Application<ApiConfiguration> {
     public void initialize(Bootstrap<ApiConfiguration> apiConfigurationBootstrap) {
         apiConfigurationBootstrap.addBundle(new ViewBundle<ApiConfiguration>(){
             @Override
-            public ImmutableMap<String, ImmutableMap<String, String>> getViewConfiguration(
+            public Map<String, Map<String, String>> getViewConfiguration(
                 ApiConfiguration arg0) {
-                return ImmutableMap.of();
+                return new HashMap();
             }
         });
         apiConfigurationBootstrap.addBundle(new AssetsBundle());

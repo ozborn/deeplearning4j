@@ -18,7 +18,8 @@
 
 package org.deeplearning4j.plot.dropwizard;
 
-import com.google.common.collect.ImmutableMap;
+import java.util.Map;
+import java.util.HashMap;
 import io.dropwizard.Application;
 import io.dropwizard.setup.Bootstrap;
 import io.dropwizard.setup.Environment;
@@ -72,9 +73,9 @@ public class ApiResource extends Application<ApiConfiguration> implements Serial
     public void initialize(Bootstrap<ApiConfiguration> bootstrap) {
         bootstrap.addBundle(new ViewBundle<ApiConfiguration>(){
             @Override
-            public ImmutableMap<String, ImmutableMap<String, String>> getViewConfiguration(
+            public Map<String, Map<String, String>> getViewConfiguration(
                 ApiConfiguration arg0) {
-                return ImmutableMap.of();
+                return new HashMap();
             }
         });
 
